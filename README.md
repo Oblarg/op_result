@@ -50,7 +50,8 @@ where
 
 ## When to use it
 
-Useful when you need to refer to the `Output` associated type of operator traits without performing the operation. For example, in dimensional analysis:
+Useful when you need to assert the legality of arithmetic operations to allow their
+use in generic contexts, and/or define aliases for result types of operations. For example:
 
 ```rust
 pub struct PIDController<

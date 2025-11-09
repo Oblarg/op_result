@@ -13,47 +13,10 @@
 //! ```
 
 use proc_macro::TokenStream;
-use quote::quote;
+use proc_macro2::Span;
+use quote::{quote, quote_spanned};
 use syn::{parse_macro_input, Expr, ExprBinary, BinOp};
 
-/// Documentation shadows for IDE hover polish.
-/// 
-/// These map operator symbols to their corresponding `std::ops` traits.
-/// While not technically used in the macro expansion, they serve as documentation
-/// to help IDEs understand the relationship between operators and traits.
-#[doc(hidden)]
-#[allow(unused_imports)]
-mod __doc_shadows {
-    /// `+` operator maps to [`std::ops::Add`]
-    pub use std::ops::Add;
-    
-    /// `-` operator maps to [`std::ops::Sub`]
-    pub use std::ops::Sub;
-    
-    /// `*` operator maps to [`std::ops::Mul`]
-    pub use std::ops::Mul;
-    
-    /// `/` operator maps to [`std::ops::Div`]
-    pub use std::ops::Div;
-    
-    /// `%` operator maps to [`std::ops::Rem`]
-    pub use std::ops::Rem;
-    
-    /// `&` operator maps to [`std::ops::BitAnd`]
-    pub use std::ops::BitAnd;
-    
-    /// `|` operator maps to [`std::ops::BitOr`]
-    pub use std::ops::BitOr;
-    
-    /// `^` operator maps to [`std::ops::BitXor`]
-    pub use std::ops::BitXor;
-    
-    /// `<<` operator maps to [`std::ops::Shl`]
-    pub use std::ops::Shl;
-    
-    /// `>>` operator maps to [`std::ops::Shr`]
-    pub use std::ops::Shr;
-}
 
 /// Expands operator expressions to associated type outputs.
 ///
@@ -104,18 +67,25 @@ pub fn output(input: TokenStream) -> TokenStream {
 }
 
 fn expand_expr(expr: &Expr) -> proc_macro2::TokenStream {
+    expand_expr_with_doc(expr, None)
+}
+
+fn expand_expr_with_doc(expr: &Expr, _parent_span: Option<Span>) -> proc_macro2::TokenStream {
     match expr {
         Expr::Binary(ExprBinary { left, op, right, .. }) => {
-            let left_expanded = expand_expr(left);
-            let right_expanded = expand_expr(right);
-            let trait_name = op_to_trait(op);
+            let left_expanded = expand_expr_with_doc(left, None);
+            let right_expanded = expand_expr_with_doc(right, None);
+            let op_span = get_op_span(op);
+            let trait_name = op_to_trait_spanned(op, op_span);
             
+            // Only apply span to the trait name, not the entire expression
+            // This prevents the 'as' keyword from inheriting the operator's span
             quote! {
                 <#left_expanded as std::ops::#trait_name<#right_expanded>>::Output
             }
         }
         Expr::Paren(expr_paren) => {
-            let inner = expand_expr(&expr_paren.expr);
+            let inner = expand_expr_with_doc(&expr_paren.expr, None);
             quote! { (#inner) }
         }
         _ => {
@@ -124,19 +94,45 @@ fn expand_expr(expr: &Expr) -> proc_macro2::TokenStream {
     }
 }
 
-fn op_to_trait(op: &BinOp) -> proc_macro2::TokenStream {
+
+fn get_op_span(op: &BinOp) -> Span {
     use syn::BinOp::*;
     match op {
-        Add(_) => quote! { Add },
-        Sub(_) => quote! { Sub },
-        Mul(_) => quote! { Mul },
-        Div(_) => quote! { Div },
-        Rem(_) => quote! { Rem },
-        BitAnd(_) => quote! { BitAnd },
-        BitOr(_) => quote! { BitOr },
-        BitXor(_) => quote! { BitXor },
-        Shl(_) => quote! { Shl },
-        Shr(_) => quote! { Shr },
+        Add(token) => token.span,
+        Sub(token) => token.span,
+        Mul(token) => token.span,
+        Div(token) => token.span,
+        Rem(token) => token.span,
+        BitAnd(token) => token.span,
+        BitOr(token) => token.span,
+        BitXor(token) => token.span,
+        Shl(token) => token.spans[0],
+        Shr(token) => token.spans[0],
+        And(token) => token.spans[0],
+        Or(token) => token.spans[0],
+        Eq(token) => token.spans[0],
+        Lt(token) => token.span,
+        Le(token) => token.spans[0],
+        Ne(token) => token.spans[0],
+        Ge(token) => token.spans[0],
+        Gt(token) => token.span,
+        _ => Span::call_site(),
+    }
+}
+
+fn op_to_trait_spanned(op: &BinOp, span: Span) -> proc_macro2::TokenStream {
+    use syn::BinOp::*;
+    match op {
+        Add(_) => quote_spanned! { span => Add },
+        Sub(_) => quote_spanned! { span => Sub },
+        Mul(_) => quote_spanned! { span => Mul },
+        Div(_) => quote_spanned! { span => Div },
+        Rem(_) => quote_spanned! { span => Rem },
+        BitAnd(_) => quote_spanned! { span => BitAnd },
+        BitOr(_) => quote_spanned! { span => BitOr },
+        BitXor(_) => quote_spanned! { span => BitXor },
+        Shl(_) => quote_spanned! { span => Shl },
+        Shr(_) => quote_spanned! { span => Shr },
         And(_) | Or(_) | Eq(_) | Lt(_) | Le(_) | Ne(_) | Ge(_) | Gt(_) => {
             syn::Error::new_spanned(op, "This operator does not have an associated Output type in std::ops")
                 .to_compile_error()
