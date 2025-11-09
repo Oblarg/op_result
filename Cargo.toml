@@ -1,0 +1,16 @@
+[package]
+name = "op_result"
+version = "0.1.0"
+edition = "2021"
+description = "Thin syntactic sugar for writing associated type algebra with std::ops expressions"
+license = "Apache-2.0 OR MIT"
+readme = "README.md"
+repository = "https://github.com/Oblarg/op_result.git"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }

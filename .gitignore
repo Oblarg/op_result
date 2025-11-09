@@ -1,0 +1,30 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo
+Cargo.lock
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Rustfmt
+rustfmt.toml
+
+# Backup files
+*.orig
+*.bak
+
+# Test output
+test_output
+
+# Environment files
+.env
+.env.local
+
