@@ -81,7 +81,7 @@ fn expand_expr_with_doc(expr: &Expr, _parent_span: Option<Span>) -> proc_macro2:
             // Only apply span to the trait name, not the entire expression
             // This prevents the 'as' keyword from inheriting the operator's span
             quote! {
-                <#left_expanded as std::ops::#trait_name<#right_expanded>>::Output
+                <#left_expanded as ::core::ops::#trait_name<#right_expanded>>::Output
             }
         }
         Expr::Paren(expr_paren) => {
