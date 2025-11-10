@@ -28,7 +28,7 @@ pub fn expand_op_result(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let throwaway_fn  = quote! {
                     #[allow(dead_code)]
                     let _: () = {
-                        /// Asserts the well-formedness of an operator definition expression
+                        /// An operator bound expression.
                         ///
                         #[doc = #expansion_doc]
                         type #defined_ident = ();

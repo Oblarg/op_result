@@ -150,7 +150,7 @@ fn test_chained_operator_bounds_with_output_assertion() {
     where
         [(); T + U + V = W]:,
     {
-        (a + b) + c
+        a + b + c
     }
 
     let result: i32 = compute_nested_with_output(1, 2, 3);
