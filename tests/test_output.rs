@@ -256,3 +256,27 @@ fn test_parens_preservation() {
     let result: output!((AddType + AddType)) = a + b;
     assert_eq!(result.0, 42);
 }
+
+#[test]
+fn test_output_unary_not() {
+    // Test unary ! operator in output! macro
+    type NotOutput = output!(!bool);
+    let _: NotOutput = !true;
+}
+
+#[test]
+fn test_output_unary_neg() {
+    // Test unary - operator in output! macro
+    type NegOutput = output!(-i32);
+    let _: NegOutput = -42i32;
+}
+
+#[test]
+fn test_output_unary_nested() {
+    // Test unary operators nested in expressions
+    type Complex = output!((!bool) & bool);
+    let _: Complex = (!true) & false;
+    
+    type ComplexNeg = output!((-i32) + i32);
+    let _: ComplexNeg = (-42i32) + 10i32;
+}

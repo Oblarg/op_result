@@ -1,6 +1,11 @@
-//! A macro for writing associated type algebra with ordinary std op expressions.
+//! Syntactic sugar for writing associated type algebra with operator expressions.
 //!
-//! # Example
+//! Provides two macros:
+//!
+//! - `output!`: Expands operator expressions to associated type outputs
+//! - `#[op_result]`: Transforms `(): IsDefined<{ ... }>` patterns in where clauses into trait bounds
+//!
+//! ## Example
 //!
 //! ```rust
 //! use op_result::output;
@@ -11,42 +16,47 @@
 //! // Works recursively
 //! type Complex = output!((i32 + i64) * f32);
 //! ```
+//! 
+//! ## Supported Operators
+//!
+//! All binary and unary operators from `std::ops` that have an associated `Output` type:
+//! - `+` → [`std::ops::Add`]
+//! - `-` → [`std::ops::Sub`]
+//! - `*` → [`std::ops::Mul`]
+//! - `/` → [`std::ops::Div`]
+//! - `%` → [`std::ops::Rem`]
+//! - `&` → [`std::ops::BitAnd`]
+//! - `|` → [`std::ops::BitOr`]
+//! - `^` → [`std::ops::BitXor`]
+//! - `<<` → [`std::ops::Shl`]
+//! - `>>` → [`std::ops::Shr`]
+//! - `!` → [`std::ops::Not`] (unary operator)
+//! - `-` → [`std::ops::Neg`] (unary operator)
+
+mod utils;
+mod output;
+mod op_result;
 
 use proc_macro::TokenStream;
-use proc_macro2::Span;
-use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, Expr, ExprBinary, BinOp};
-
 
 /// Expands operator expressions to associated type outputs.
 ///
-/// This macro provides syntactic sugar for accessing the `Output` associated type
-/// of `std::ops` traits. Instead of writing verbose associated type syntax like
-/// `<T as std::ops::Add<U>>::Output`, you can write `output!(T + U)`.
+/// Transforms `output!(T + U)` into `<T as std::ops::Add<U>>::Output`. Works recursively
+/// for nested expressions, preserving parentheses for operator precedence.
+/// 
+/// ## Syntax
+/// 
+/// ```rust,ignore
+/// output!(<expr>)
+/// ```
+/// 
+/// where `<expr>` is any valid operator output expression.  An "operator output expression" is:
+///  - A binary operator expression, e.g. `T + U`
+///  - A unary operator expression, e.g. `!T` or `-T`
+///  - A parenthesized operator expression, e.g. `(T + U)`
+///  - A combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)`
 ///
-/// The macro recursively processes nested expressions, preserving parentheses for
-/// operator precedence. Each binary operator is transformed into its corresponding
-/// `std::ops` trait's `Output` type.
-///
-/// # Supported Operators
-///
-/// All binary operators from `std::ops` that have an associated `Output` type:
-///
-/// - `+` → [`std::ops::Add`]
-/// - `-` → [`std::ops::Sub`]
-/// - `*` → [`std::ops::Mul`]
-/// - `/` → [`std::ops::Div`]
-/// - `%` → [`std::ops::Rem`]
-/// - `&` → [`std::ops::BitAnd`]
-/// - `|` → [`std::ops::BitOr`]
-/// - `^` → [`std::ops::BitXor`]
-/// - `<<` → [`std::ops::Shl`]
-/// - `>>` → [`std::ops::Shr`]
-///
-/// Operators without associated `Output` types (comparison and logical operators)
-/// are not supported and will result in a compile-time error.
-///
-/// # Examples
+/// ## Examples
 ///
 /// ```rust
 /// use op_result::output;
@@ -61,85 +71,57 @@ use syn::{parse_macro_input, Expr, ExprBinary, BinOp};
 /// ```
 #[proc_macro]
 pub fn output(input: TokenStream) -> TokenStream {
-    let expr = parse_macro_input!(input as Expr);
-    let output = expand_expr(&expr);
-    TokenStream::from(output)
+    output::expand_output(input)
 }
 
-fn expand_expr(expr: &Expr) -> proc_macro2::TokenStream {
-    expand_expr_with_doc(expr, None)
-}
-
-fn expand_expr_with_doc(expr: &Expr, _parent_span: Option<Span>) -> proc_macro2::TokenStream {
-    match expr {
-        Expr::Binary(ExprBinary { left, op, right, .. }) => {
-            let left_expanded = expand_expr_with_doc(left, None);
-            let right_expanded = expand_expr_with_doc(right, None);
-            let op_span = get_op_span(op);
-            let trait_name = op_to_trait_spanned(op, op_span);
-            
-            // Only apply span to the trait name, not the entire expression
-            // This prevents the 'as' keyword from inheriting the operator's span
-            quote! {
-                <#left_expanded as ::core::ops::#trait_name<#right_expanded>>::Output
-            }
-        }
-        Expr::Paren(expr_paren) => {
-            let inner = expand_expr_with_doc(&expr_paren.expr, None);
-            quote! { (#inner) }
-        }
-        _ => {
-            quote! { #expr }
-        }
-    }
-}
-
-
-fn get_op_span(op: &BinOp) -> Span {
-    use syn::BinOp::*;
-    match op {
-        Add(token) => token.span,
-        Sub(token) => token.span,
-        Mul(token) => token.span,
-        Div(token) => token.span,
-        Rem(token) => token.span,
-        BitAnd(token) => token.span,
-        BitOr(token) => token.span,
-        BitXor(token) => token.span,
-        Shl(token) => token.spans[0],
-        Shr(token) => token.spans[0],
-        And(token) => token.spans[0],
-        Or(token) => token.spans[0],
-        Eq(token) => token.spans[0],
-        Lt(token) => token.span,
-        Le(token) => token.spans[0],
-        Ne(token) => token.spans[0],
-        Ge(token) => token.spans[0],
-        Gt(token) => token.span,
-        _ => Span::call_site(),
-    }
-}
-
-fn op_to_trait_spanned(op: &BinOp, span: Span) -> proc_macro2::TokenStream {
-    use syn::BinOp::*;
-    match op {
-        Add(_) => quote_spanned! { span => Add },
-        Sub(_) => quote_spanned! { span => Sub },
-        Mul(_) => quote_spanned! { span => Mul },
-        Div(_) => quote_spanned! { span => Div },
-        Rem(_) => quote_spanned! { span => Rem },
-        BitAnd(_) => quote_spanned! { span => BitAnd },
-        BitOr(_) => quote_spanned! { span => BitOr },
-        BitXor(_) => quote_spanned! { span => BitXor },
-        Shl(_) => quote_spanned! { span => Shl },
-        Shr(_) => quote_spanned! { span => Shr },
-        And(_) | Or(_) | Eq(_) | Lt(_) | Le(_) | Ne(_) | Ge(_) | Gt(_) => {
-            syn::Error::new_spanned(op, "This operator does not have an associated Output type in std::ops")
-                .to_compile_error()
-        }
-        _ => {
-            syn::Error::new_spanned(op, "Unsupported operator")
-                .to_compile_error()
-        }
-    }
+/// Transforms `(): IsDefined<{ ... }>` patterns in where clauses into trait bounds.
+///
+/// The attribute macro processes the entire function and transforms `(): IsDefined<{ T + U }>`
+/// into `T: std::ops::Add<U>`, `(): IsDefined<{ T - U }>` into `T: std::ops::Sub<U>`, etc.
+/// 
+/// ## Syntax
+/// 
+/// ```rust,ignore
+/// #[op_result]
+/// fn <fn_name>()
+/// where
+///     (): IsDefined<{ <expr> }>,
+/// {
+/// }
+/// ```
+/// 
+/// where `<expr>` is any valid operator definition expression. An "operator definition expression" is:
+///  - A binary operator expression, e.g. `T + U`
+///  - A unary operator expression, e.g. `!T` or `-T`
+/// 
+/// To assert the definition of a nested operator expression, use the `output!` macro inside the `IsDefined` expression.
+///
+/// ## Examples
+///
+/// ```rust
+/// use op_result::op_result;
+///
+/// #[op_result]
+/// fn example_add<T, U>()
+/// where
+///     (): IsDefined<{ T + U }>,
+/// {
+/// }
+/// ```
+///
+/// ```rust
+/// use op_result::op_result;
+/// use op_result::output;
+///
+/// #[op_result]
+/// fn example_sub<T, U>()
+/// where
+///     (): IsDefined<{ T - U }>,
+///     (): IsDefined<{ output!(T - U) - U }>,
+/// {
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
+    op_result::expand_op_result(attr, item)
 }
