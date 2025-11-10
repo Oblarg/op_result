@@ -92,12 +92,12 @@ fn test_mixed_notations() {
 #[test]
 fn test_bracket_notation_with_equals() {
     #[op_result]
-    fn test<T, U, V>()
+    fn test<T, U, V>(a: T, b: U) -> V
     where
         [(); T + U = V]:,
     {
+        a + b
     }
 
-    // This should compile if T: Add<U, Output = V>
-    test::<i32, i32, i32>();
+    assert_eq!(test(1, 2), 3);
 }

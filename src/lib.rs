@@ -8,13 +8,19 @@
 //! ## Example
 //!
 //! ```rust
+//! use op_result::op_result;
 //! use op_result::output;
 //!
-//! // `output!(T + U)` expands to `<T as Add<U>>::Output`
-//! type Sum = output!(i32 + i64);
+//! #[op_result]
+//! fn add<T, U>(a: T, b: U) -> output!(T + U)
+//! where
+//!     [(); T + U]:,
+//! {
+//!     a + b
+//! }
 //!
-//! // Works recursively
-//! type Complex = output!((i32 + i64) * f32);
+//! let result = add(1, 2);
+//! assert_eq!(result, 3);
 //! ```
 //! 
 //! ## Supported Operators
@@ -59,15 +65,19 @@ use proc_macro::TokenStream;
 /// ## Examples
 ///
 /// ```rust
+/// use op_result::op_result;
 /// use op_result::output;
 ///
-/// // Basic operation
-/// type Sum = output!(i32 + i64);
-/// // Expands to: <i32 as std::ops::Add<i64>>::Output
+/// #[op_result]
+/// fn add<T, U>(a: T, b: U) -> output!(T + U)
+/// where
+///     [(); T + U]:,
+/// {
+///     a + b
+/// }
 ///
-/// // Nested operations with parentheses
-/// type Complex = output!((i32 + i64) * f32);
-/// // Expands to: <<i32 as std::ops::Add<i64>>::Output as std::ops::Mul<f32>>::Output
+/// // Type inference works automatically
+/// let result = add(1, 2);
 /// ```
 #[proc_macro]
 pub fn output(input: TokenStream) -> TokenStream {
@@ -102,24 +112,50 @@ pub fn output(input: TokenStream) -> TokenStream {
 ///
 /// ```rust
 /// # use op_result::op_result;
+/// # use op_result::output;
 /// #[op_result]
-/// fn example_add<T, U>()
+/// fn example_add<T, U>(a: T, b: U) -> output!(T + U)
 /// where
 ///     [(); T + U]:,
 /// {
+///     a + b
 /// }
+///
+/// let result = example_add(1, 2);
+/// assert_eq!(result, 3);
 /// ```
 ///
 /// ```rust
 /// # use op_result::op_result;
 /// # use op_result::output;
 /// #[op_result]
-/// fn example_sub<T, U>()
+/// fn example_sub<T, U>(a: T, b: U) -> output!(output!(T - U) - U)
 /// where
 ///     [(); T - U]:,
 ///     [(); output!(T - U) - U]:,
+///     U: Copy,
 /// {
+///     (a - b) - b
 /// }
+///
+/// let result = example_sub(10, 2);
+/// assert_eq!(result, 6);
+/// ```
+///
+/// The output type can be assigned using the `=` operator:
+///
+/// ```rust
+/// # use op_result::op_result;
+/// #[op_result]
+/// fn example_output_assignment<T, U, V>(a: T, b: U) -> V
+/// where
+///     [(); T + U = V]:,
+/// {
+///     a + b
+/// }
+///
+/// let result: i32 = example_output_assignment(1, 2);
+/// assert_eq!(result, 3);
 /// ```
 #[proc_macro_attribute]
 pub fn op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
