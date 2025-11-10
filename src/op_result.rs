@@ -184,7 +184,7 @@ fn try_parse_and_expand_defined_from_stream(arg_stream: proc_macro2::TokenStream
     // The arg_stream might be wrapped in braces (for const generic expressions)
     // or it might be a direct expression. Try parsing both ways.
     
-    // First, try parsing as comma-separated: Expr, Expr? (for Output type)
+    // First, try parsing as equals-separated: Expr = Expr (for Output type)
     match parse_defined_input(arg_stream.clone()) {
         Ok((first_expr, second_expr)) => {
             // Check if first_expr is a binary expression
@@ -244,25 +244,44 @@ fn try_parse_and_expand_defined_from_stream(arg_stream: proc_macro2::TokenStream
 
 
 fn parse_defined_input(input: proc_macro2::TokenStream) -> syn::Result<(Expr, Option<Expr>)> {
-    // Parse as comma-separated: Expr, Expr?
-    struct DefinedInput {
-        first: Expr,
-        second: Option<Expr>,
-    }
+    // Parse as equals-separated: Expr = Expr
+    // We need to manually split on `=` because `=` is a valid binary operator (equality)
+    // in Rust expressions, so syn would parse `T + U = V` as an equality comparison.
     
-    impl syn::parse::Parse for DefinedInput {
-        fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-            let first = input.parse()?;
-            let second = if input.peek(syn::Token![,]) {
-                let _comma: syn::Token![,] = input.parse()?;
-                Some(input.parse()?)
-            } else {
-                None
-            };
-            Ok(DefinedInput { first, second })
+    // Convert to a vector of tokens so we can find the `=` separator
+    let tokens: Vec<proc_macro2::TokenTree> = input.into_iter().collect();
+    
+    // Collect tokens up to the first top-level `=`
+    // Groups are atomic (we see the whole group as one token), so we don't need
+    // to track depth - we just split on the first `=` we see
+    let mut first_tokens = proc_macro2::TokenStream::new();
+    let mut second_tokens = proc_macro2::TokenStream::new();
+    let mut found_equals = false;
+    
+    for tt in tokens {
+        if found_equals {
+            second_tokens.extend(std::iter::once(tt));
+            continue;
         }
+        
+        if let proc_macro2::TokenTree::Punct(p) = &tt {
+            if p.as_char() == '=' {
+                found_equals = true;
+                // Don't add `=` to either stream
+                continue;
+            }
+        }
+        
+        first_tokens.extend(std::iter::once(tt));
     }
     
-    syn::parse2::<DefinedInput>(input).map(|parsed| (parsed.first, parsed.second))
+    let first = syn::parse2::<Expr>(first_tokens)?;
+    let second = if found_equals {
+        Some(syn::parse2::<Expr>(second_tokens)?)
+    } else {
+        None
+    };
+    
+    Ok((first, second))
 }
 
