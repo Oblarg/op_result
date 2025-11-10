@@ -55,25 +55,10 @@ use op_result::op_result;
 use op_result::output;
 
 #[op_result]
-fn example_add<T, U>(a: T, b: U) -> output!(T + U)
+fn example_sub<T, U>(a: T, b: U) -> output!(T - U - U)
 where
-    [(); T + U]:,
-{
-    a + b
-}
-```
-
-To assert the definition of a nested operator expression, use the `output!` macro inside the expression:
-
-```rust
-use op_result::op_result;
-use op_result::output;
-
-#[op_result]
-fn example_sub<T, U>(a: T, b: U) -> output!(output!(T - U) - U)
-where
-    [(); T - U]:,
-    [(); output!(T - U) - U]:,
+    [(); T - U - U]:,
+    U: Copy,
 {
     (a - b) - b
 }

@@ -26,18 +26,18 @@
 //! ## Supported Operators
 //!
 //! All binary and unary operators from `std::ops` that have an associated `Output` type:
-//! - `+` → [`std::ops::Add`]
-//! - `-` → [`std::ops::Sub`]
-//! - `*` → [`std::ops::Mul`]
-//! - `/` → [`std::ops::Div`]
-//! - `%` → [`std::ops::Rem`]
-//! - `&` → [`std::ops::BitAnd`]
-//! - `|` → [`std::ops::BitOr`]
-//! - `^` → [`std::ops::BitXor`]
-//! - `<<` → [`std::ops::Shl`]
-//! - `>>` → [`std::ops::Shr`]
-//! - `!` → [`std::ops::Not`] (unary operator)
-//! - `-` → [`std::ops::Neg`] (unary operator)
+//! - `+` → [`std::ops::Add`](https://doc.rust-lang.org/std/ops/trait.Add.html)
+//! - `-` → [`std::ops::Sub`](https://doc.rust-lang.org/std/ops/trait.Sub.html)
+//! - `*` → [`std::ops::Mul`](https://doc.rust-lang.org/std/ops/trait.Mul.html)
+//! - `/` → [`std::ops::Div`](https://doc.rust-lang.org/std/ops/trait.Div.html)
+//! - `%` → [`std::ops::Rem`](https://doc.rust-lang.org/std/ops/trait.Rem.html)
+//! - `&` → [`std::ops::BitAnd`](https://doc.rust-lang.org/std/ops/trait.BitAnd.html)
+//! - `|` → [`std::ops::BitOr`](https://doc.rust-lang.org/std/ops/trait.BitOr.html)
+//! - `^` → [`std::ops::BitXor`](https://doc.rust-lang.org/std/ops/trait.BitXor.html)
+//! - `<<` → [`std::ops::Shl`](https://doc.rust-lang.org/std/ops/trait.Shl.html)
+//! - `>>` → [`std::ops::Shr`](https://doc.rust-lang.org/std/ops/trait.Shr.html)
+//! - `!` → [`std::ops::Not`](https://doc.rust-lang.org/std/ops/trait.Not.html) (unary operator)
+//! - `-` → [`std::ops::Neg`](https://doc.rust-lang.org/std/ops/trait.Neg.html) (unary operator)
 
 mod utils;
 mod output;
@@ -57,10 +57,10 @@ use proc_macro::TokenStream;
 /// ```
 /// 
 /// where `<expr>` is any valid operator output expression.  An "operator output expression" is:
-///  - A binary operator expression, e.g. `T + U`
-///  - A unary operator expression, e.g. `!T` or `-T`
-///  - A parenthesized operator expression, e.g. `(T + U)`
-///  - A combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)`
+///  - A unary operator expression, e.g. `!T` or `-T` (equivalent to `<T as std::ops::Not>::Output` or `<T as std::ops::Neg>::Output`)
+///  - A binary operator expression, e.g. `T + U` (equivalent to `<T as std::ops::Add<U>>::Output`)
+///  - A combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)` 
+///    (equivalent to `<T as std::ops::Add<U, Output: Mul<V>>>::Output` or `<T as std::ops::Add<U, Output: Mul<V, Output: Mul<W>>>>::Output`)
 ///
 /// ## Examples
 ///
@@ -102,11 +102,12 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// }
 /// ```
 /// 
-/// where `<expr>` is any valid operator definition expression. An "operator definition expression" is:
-///  - A binary operator expression, e.g. `T + U`
-///  - A unary operator expression, e.g. `!T` or `-T`
-/// 
-/// To assert the definition of a nested operator expression, use the `output!` macro inside the expression.
+/// where `<expr>` is any valid operator bound expression. An "operator bound expression" is:
+///  - A unary operator expression, e.g. `!T` or `-T` (equivalent to `T: Not` or `T: Neg`)
+///  - A binary operator expression, e.g. `T + U` (equivalent to `T: Add<U>`)
+///  - Any combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)` 
+///    (equivalent to `T: Add<U, Output: Mul<V>>` or `T: Add<U, Output: Mul<V, Output: Mul<W>>>`)
+///  - An assignment of any of the above to a type, e.g. `T + U = V` (equivalent to `T: Add<U, Output = V>`)
 ///
 /// ## Examples
 ///
@@ -129,10 +130,9 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// # use op_result::op_result;
 /// # use op_result::output;
 /// #[op_result]
-/// fn example_sub<T, U>(a: T, b: U) -> output!(output!(T - U) - U)
+/// fn example_sub<T, U>(a: T, b: U) -> output!(T - U - U)
 /// where
-///     [(); T - U]:,
-///     [(); output!(T - U) - U]:,
+///     [(); T - U - U]:,
 ///     U: Copy,
 /// {
 ///     (a - b) - b

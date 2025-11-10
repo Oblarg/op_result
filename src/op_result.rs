@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
-use quote::{quote};
+use quote::{quote, quote_spanned};
 use syn::{Expr, ExprBinary, ExprUnary, ItemFn};
 
 use crate::utils;
@@ -181,69 +181,191 @@ fn expand_defined_in_token_tree(tt: proc_macro2::TokenStream) -> (proc_macro2::T
 }
 
 fn try_parse_and_expand_defined_from_stream(arg_stream: proc_macro2::TokenStream) -> Option<proc_macro2::TokenStream> {
-    // The arg_stream might be wrapped in braces (for const generic expressions)
-    // or it might be a direct expression. Try parsing both ways.
+    // Parse the input stream which may contain:
+    // 1. A simple operator expression: `T + U`
+    // 2. An operator expression with Output assignment: `T + U = V`
+    // 3. A chained operator expression: `T + U + V` → `T: Add<U, Output: Add<V>>`
     
     // First, try parsing as equals-separated: Expr = Expr (for Output type)
-    match parse_defined_input(arg_stream.clone()) {
-        Ok((first_expr, second_expr)) => {
-            // Check if first_expr is a binary expression
-            if let Expr::Binary(ExprBinary { left, op, right, .. }) = &first_expr {
-                let op_span = utils::get_op_span(op);
-                let trait_name = utils::op_to_trait_spanned(op, op_span);
-                
-                if let Some(output_expr) = second_expr {
-                    return Some(quote! {
-                        #left: std::ops::#trait_name<#right, Output = #output_expr>
-                    });
-                } else {
-                    return Some(quote! {
-                        #left: std::ops::#trait_name<#right>
-                    });
-                }
-            }
-            // Check if first_expr is a unary expression
-            if let Expr::Unary(ExprUnary { op, expr: inner_expr, .. }) = &first_expr {
-                let op_span = utils::get_un_op_span(op);
-                let trait_name = utils::un_op_to_trait_spanned(op, op_span);
-                
-                if let Some(output_expr) = second_expr {
-                    return Some(quote! {
-                        #inner_expr: std::ops::#trait_name<Output = #output_expr>
-                    });
-                } else {
-                    return Some(quote! {
-                        #inner_expr: std::ops::#trait_name
-                    });
-                }
-            }
-        }
+    let (main_expr, output_expr) = match parse_equals_separated(arg_stream.clone()) {
+        Ok((expr, output)) => (expr, output),
         Err(_) => {
-            // Try parsing as just an expression (no Output type)
-            if let Ok(expr) = syn::parse2::<Expr>(arg_stream.clone()) {
-                if let Expr::Binary(ExprBinary { left, op, right, .. }) = &expr {
-                    let op_span = utils::get_op_span(op);
-                    let trait_name = utils::op_to_trait_spanned(op, op_span);
-                    return Some(quote! {
-                        #left: std::ops::#trait_name<#right>
-                    });
-                }
-                if let Expr::Unary(ExprUnary { op, expr: inner_expr, .. }) = &expr {
-                    let op_span = utils::get_un_op_span(op);
-                    let trait_name = utils::un_op_to_trait_spanned(op, op_span);
-                    return Some(quote! {
-                        #inner_expr: std::ops::#trait_name
-                    });
-                }
+            // Try parsing as just an expression
+            match syn::parse2::<Expr>(arg_stream) {
+                Ok(expr) => (expr, None),
+                Err(_) => return None,
             }
         }
-    }
+    };
     
-    None
+    // Build the trait bound, handling chained operators
+    expand_expr_to_bound(&main_expr, output_expr.as_ref())
 }
 
+// Recursively expands an expression to a trait bound, handling chained operators
+fn expand_expr_to_bound(expr: &Expr, output_assign: Option<&Expr>) -> Option<proc_macro2::TokenStream> {
+    match expr {
+        // Unwrap parentheses - syn respects precedence automatically, so we just unwrap
+        Expr::Paren(expr_paren) => {
+            expand_expr_to_bound(&expr_paren.expr, output_assign)
+        }
+        Expr::Binary(ExprBinary { left, op, right, .. }) => {
+            let op_span = utils::get_op_span(op);
+            let trait_name = utils::op_to_trait_spanned(op, op_span);
+            
+            // Check if left is also a binary expression with the same operator (chained)
+            if let Expr::Binary(ExprBinary { op: left_op, .. }) = left.as_ref() {
+                // Check if operators match (for chaining)
+                if std::mem::discriminant(op) == std::mem::discriminant(left_op) {
+                    // This is a chain: (T + U) + V or ((T + U) + V) + W, etc.
+                    // Extract the base type and all the operations
+                    let (base_type, mut operations) = extract_chain_operations(left.as_ref(), op);
+                    operations.push((op_span, trait_name, right.clone()));
+                    
+                    // Build the nested bound
+                    return Some(build_nested_bound(base_type, &operations, output_assign));
+                }
+            }
+            
+            // Not a chain, or operators don't match - treat as simple binary expression
+            let mut generic_params = quote! { #right };
+            
+            // Add Output = ... if specified
+            if let Some(output) = output_assign {
+                generic_params = quote! { #right, Output = #output };
+            }
+            
+            Some(quote! {
+                #left: std::ops::#trait_name<#generic_params>
+            })
+        }
+        Expr::Unary(ExprUnary { op, expr: inner_expr, .. }) => {
+            let op_span = utils::get_un_op_span(op);
+            let trait_name = utils::un_op_to_trait_spanned(op, op_span);
+            
+            let mut generic_params = proc_macro2::TokenStream::new();
+            
+            // Add Output = ... if specified
+            if let Some(output) = output_assign {
+                generic_params = quote! { Output = #output };
+            }
+            
+            if generic_params.is_empty() {
+                Some(quote! {
+                    #inner_expr: std::ops::#trait_name
+                })
+            } else {
+                Some(quote! {
+                    #inner_expr: std::ops::#trait_name<#generic_params>
+                })
+            }
+        }
+        _ => None,
+    }
+}
 
-fn parse_defined_input(input: proc_macro2::TokenStream) -> syn::Result<(Expr, Option<Expr>)> {
+// Extracts the base type and all operations from a chained expression
+// Returns (base_type, operations) where operations are in left-to-right order
+fn extract_chain_operations(
+    expr: &Expr,
+    op: &syn::BinOp,
+) -> (Box<Expr>, Vec<(proc_macro2::Span, proc_macro2::TokenStream, Box<Expr>)>) {
+    match expr {
+        // Unwrap parentheses - syn already handled precedence
+        Expr::Paren(expr_paren) => {
+            extract_chain_operations(&expr_paren.expr, op)
+        }
+        Expr::Binary(ExprBinary { left, op: left_op, right, .. }) => {
+            if std::mem::discriminant(op) == std::mem::discriminant(left_op) {
+                // Same operator - continue extracting from left
+                let (base_type, mut operations) = extract_chain_operations(left.as_ref(), op);
+                // Add the current operation
+                let left_op_span = utils::get_op_span(left_op);
+                let left_trait_name = utils::op_to_trait_spanned(left_op, left_op_span);
+                operations.push((left_op_span, left_trait_name, right.clone()));
+                (base_type, operations)
+            } else {
+                // Different operator - this is the base, extract operations from left
+                let (base_type, mut operations) = extract_chain_operations(left.as_ref(), left_op);
+                // Add the current operation
+                let left_op_span = utils::get_op_span(left_op);
+                let left_trait_name = utils::op_to_trait_spanned(left_op, left_op_span);
+                operations.push((left_op_span, left_trait_name, right.clone()));
+                (base_type, operations)
+            }
+        }
+        _ => {
+            // Base case: not a binary expression - this is the base type
+            (Box::new(expr.clone()), Vec::new())
+        }
+    }
+}
+
+// Builds a nested bound like `T: Add<U, Output: Add<V, Output: Add<W>>>`
+// operations should be in order from leftmost to rightmost
+// For T + U + V + W, operations = [(Add, U), (Add, V), (Add, W)]
+fn build_nested_bound(
+    base_type: Box<Expr>,
+    operations: &[(proc_macro2::Span, proc_macro2::TokenStream, Box<Expr>)],
+    output_assign: Option<&Expr>,
+) -> proc_macro2::TokenStream {
+    if operations.is_empty() {
+        return quote! {};
+    }
+    
+    // For T + U + V + W, we want: T: Add<U, Output: Add<V, Output: Add<W>>>
+    // Build from rightmost (innermost) to leftmost (outermost)
+    
+    if operations.len() == 1 {
+        // Single operation: T: Add<U>
+        let (span, trait_name, right) = &operations[0];
+        let trait_spanned = quote_spanned! { *span => std::ops::#trait_name };
+        let mut generic_params = quote! { #right };
+        if let Some(output) = output_assign {
+            generic_params = quote! { #right, Output = #output };
+        }
+        return quote! {
+            #base_type: #trait_spanned<#generic_params>
+        };
+    }
+    
+    // Multiple operations: build nested Output bounds
+    let (last_span, last_trait, last_right) = &operations[operations.len() - 1];
+    let last_trait_spanned = quote_spanned! { *last_span => std::ops::#last_trait };
+    
+    // Start with the innermost bound: Output: Add<W> or Output: Add<W, Output = X>
+    let mut nested_output = if let Some(output) = output_assign {
+        quote! {
+            Output: #last_trait_spanned<#last_right, Output = #output>
+        }
+    } else {
+        quote! {
+            Output: #last_trait_spanned<#last_right>
+        }
+    };
+    
+    // Build nested Output bounds from second-to-last down to second operation
+    // For T + U + V + W: operations = [(Add, U), (Add, V), (Add, W)]
+    // We iterate over [(Add, V)] (skip last, stop before first)
+    for (span, trait_name, right) in operations.iter().rev().skip(1).take(operations.len() - 2) {
+        let trait_spanned = quote_spanned! { *span => std::ops::#trait_name };
+        nested_output = quote! {
+            Output: #trait_spanned<#right, #nested_output>
+        };
+    }
+    
+    // Add the outermost operation
+    let (first_span, first_trait, first_right) = &operations[0];
+    let first_trait_spanned = quote_spanned! { *first_span => std::ops::#first_trait };
+    
+    let generic_params = quote! { #first_right, #nested_output };
+    
+    quote! {
+        #base_type: #first_trait_spanned<#generic_params>
+    }
+}
+
+fn parse_equals_separated(input: proc_macro2::TokenStream) -> syn::Result<(Expr, Option<Expr>)> {
     // Parse as equals-separated: Expr = Expr
     // We need to manually split on `=` because `=` is a valid binary operator (equality)
     // in Rust expressions, so syn would parse `T + U = V` as an equality comparison.
