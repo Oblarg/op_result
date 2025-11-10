@@ -1,168 +1,90 @@
 # op_result
 
-Syntactic sugar for writing associated type algebra. Provides two macros:
+Syntactic sugar for writing associated type algebra with operator expressions.
 
-- `output!`: Transforms `output!(T + U)` into `<T as std::ops::Add<U>>::Output`. Works recursively for nested operations.
-- `#[op_result]`: Attribute macro that transforms operator expressions in where clauses into trait bounds like `T: std::ops::Add<U>`. Supports two syntaxes: `(): IsDefined<{ ... }>` and `[(); ...]:`.
+Provides two macros:
 
-## Usage
+- `output!`: Expands operator expressions to associated type outputs
+- `#[op_result]`: Transforms operator expressions in where clauses into trait bounds. Supports two syntaxes: `(): IsDefined<{ ... }>` and `[(); ...]:`
 
-The `output!` macro expands operator expressions to associated type outputs. For example:
+## Example
 
 ```rust
 use op_result::output;
 
+// `output!(T + U)` expands to `<T as Add<U>>::Output`
+type Sum = output!(i32 + i64);
+
+// Works recursively
+type Complex = output!((i32 + i64) * f32);
+```
+
+## Usage
+
+### `output!` macro
+
+Transforms `output!(T + U)` into `<T as std::ops::Add<U>>::Output`. Works recursively for nested expressions, preserving parentheses for operator precedence.
+
+```rust
+use op_result::output;
+
+// Basic operation
 type Sum = output!(i32 + i64);
 // Expands to: <i32 as std::ops::Add<i64>>::Output
 
+// Nested operations with parentheses
 type Complex = output!((i32 + i64) * f32);
 // Expands to: <<i32 as std::ops::Add<i64>>::Output as std::ops::Mul<f32>>::Output
 ```
 
-## The `#[op_result]` attribute macro
+### `#[op_result]` attribute macro
 
-The `#[op_result]` attribute macro transforms operator expressions in where clauses into trait bounds. It supports two syntaxes:
-
-### Syntax 1: `(): IsDefined<{ ... }>`
+Transforms operator expressions in where clauses into trait bounds.
 
 ```rust
 use op_result::op_result;
 
 #[op_result]
-fn compute_sum<T, U>(a: T, b: U) -> T
+fn example_add<T, U>()
 where
-    (): IsDefined<{ T + U }>,  // Expands to: T: std::ops::Add<U>
+    [(); T + U]:,
 {
-    a + b
 }
 ```
 
-### Syntax 2: `[(); ...]:`
+To assert the definition of a nested operator expression, use the `output!` macro inside the expression:
 
-```rust
-use op_result::op_result;
-
-#[op_result]
-fn compute_sum<T, U>(a: T, b: U) -> T
-where
-    [(); T + U]:,  // Expands to: T: std::ops::Add<U>
-{
-    a + b
-}
-```
-
-### Using `output!` with `#[op_result]`
-
-The `output!` macro can be used inside both syntaxes to specify bounds on operation results:
-
-**With `IsDefined` syntax:**
 ```rust
 use op_result::op_result;
 use op_result::output;
 
 #[op_result]
-fn compute_nested<T, U, V>(a: T, b: U, c: V) -> output!(T + U + V)
+fn example_sub<T, U>()
 where
-    (): IsDefined<{ T + U }>,                    // T: std::ops::Add<U>
-    (): IsDefined<{ output!(T + U) + V }>,      // <T as std::ops::Add<U>>::Output: std::ops::Add<V>
+    [(); T - U]:,
+    [(); output!(T - U) - U]:,
 {
-    a + b + c
 }
 ```
 
-**With bracket syntax:**
-```rust
-use op_result::op_result;
-use op_result::output;
+Both `[(); ...]:` and `(): IsDefined<{ ... }>` syntaxes are supported.
 
-#[op_result]
-fn compute_nested<T, U, V>(a: T, b: U, c: V) -> output!(T + U + V)
-where
-    [(); T + U]:,                                // T: std::ops::Add<U>
-    [(); output!(T + U) + V]:,                   // <T as std::ops::Add<U>>::Output: std::ops::Add<V>
-{
-    a + b + c
-}
-```
+## Supported Operators
 
-### How it works
-
-Normal macros cannot be used in where clauses. The `#[op_result]` attribute macro processes the entire function and transforms operator expressions (using either `IsDefined` or bracket syntax) into trait bounds before the compiler sees them, enabling operator syntax in trait bounds.
-
-## Examples
-
-Using `output!` to define type aliases for operation results:
-
-```rust
-pub struct PIDController<
-    PV: ProcessVariable,
-    CO: ControlOutput,
-    T: Time,
-    ProportionalGain = output!(CO / PV),
-    IntegralGain = output!(CO / (PV * T)),
-    DerivativeGain = output!((CO * T) / PV),
-> {
-    // ...
-}
-```
-
-Using `#[op_result]` to specify trait bounds in where clauses:
-
-**With `IsDefined` syntax:**
-```rust
-use op_result::op_result;
-use op_result::output;
-
-#[op_result]
-fn process_data<T, U, V>(data: T, scale: U, offset: V) -> output!((T * U) + V)
-where
-    (): IsDefined<{ T * U }>,
-    (): IsDefined<{ output!(T * U) + V }>,
-{
-    (data * scale) + offset
-}
-```
-
-**With bracket syntax:**
-```rust
-use op_result::op_result;
-use op_result::output;
-
-#[op_result]
-fn process_data<T, U, V>(data: T, scale: U, offset: V) -> output!((T * U) + V)
-where
-    [(); T * U]:,
-    [(); output!(T * U) + V]:,
-{
-    (data * scale) + offset
-}
-```
-
-## Supported operators
-
-All `std::ops` binary and unary operators with associated `Output` types:
-
-### Binary operators
-
-- `+` → `Add`
-- `-` → `Sub`
-- `*` → `Mul`
-- `/` → `Div`
-- `%` → `Rem`
-- `&` → `BitAnd`
-- `|` → `BitOr`
-- `^` → `BitXor`
-- `<<` → `Shl`
-- `>>` → `Shr`
-
-### Unary operators
-
-- `!` → `Not`
-- `-` → `Neg` (unary negation)
-
-Both macros support all of these operators. Comparison and logical operators (`==`, `&&`, `||`, etc.) are not supported as they don't have associated `Output` types in `std::ops`.
+All binary and unary operators from `std::ops` that have an associated `Output` type:
+- `+` → [`std::ops::Add`]
+- `-` → [`std::ops::Sub`]
+- `*` → [`std::ops::Mul`]
+- `/` → [`std::ops::Div`]
+- `%` → [`std::ops::Rem`]
+- `&` → [`std::ops::BitAnd`]
+- `|` → [`std::ops::BitOr`]
+- `^` → [`std::ops::BitXor`]
+- `<<` → [`std::ops::Shl`]
+- `>>` → [`std::ops::Shr`]
+- `!` → [`std::ops::Not`] (unary operator)
+- `-` → [`std::ops::Neg`] (unary operator)
 
 ## License
 
 Licensed under either of Apache License, Version 2.0 or MIT license at your option.
-
