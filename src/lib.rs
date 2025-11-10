@@ -3,7 +3,7 @@
 //! Provides two macros:
 //!
 //! - `output!`: Expands operator expressions to associated type outputs
-//! - `#[op_result]`: Transforms `(): IsDefined<{ ... }>` patterns in where clauses into trait bounds
+//! - `#[op_result]`: Transforms operator expressions in where clauses into trait bounds. Supports two syntaxes: `(): IsDefined<{ ... }>` and `[(); ...]:`
 //!
 //! ## Example
 //!
@@ -74,10 +74,10 @@ pub fn output(input: TokenStream) -> TokenStream {
     output::expand_output(input)
 }
 
-/// Transforms `(): IsDefined<{ ... }>` patterns in where clauses into trait bounds.
+/// Transforms operator expressions in where clauses into trait bounds.
 ///
-/// The attribute macro processes the entire function and transforms `(): IsDefined<{ T + U }>`
-/// into `T: std::ops::Add<U>`, `(): IsDefined<{ T - U }>` into `T: std::ops::Sub<U>`, etc.
+/// The attribute macro processes the entire function and transforms operator expressions
+/// into trait bounds.
 /// 
 /// ## Syntax
 /// 
@@ -85,7 +85,9 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// #[op_result]
 /// fn <fn_name>()
 /// where
-///     (): IsDefined<{ <expr> }>,
+///     [(); <expr>]:, // "well-formedness" syntax
+///     // or, equivalently,
+///     (): IsDefined<{ <expr> }>, // "marker trait" syntax
 /// {
 /// }
 /// ```
@@ -94,30 +96,28 @@ pub fn output(input: TokenStream) -> TokenStream {
 ///  - A binary operator expression, e.g. `T + U`
 ///  - A unary operator expression, e.g. `!T` or `-T`
 /// 
-/// To assert the definition of a nested operator expression, use the `output!` macro inside the `IsDefined` expression.
+/// To assert the definition of a nested operator expression, use the `output!` macro inside the expression.
 ///
 /// ## Examples
 ///
 /// ```rust
-/// use op_result::op_result;
-///
+/// # use op_result::op_result;
 /// #[op_result]
 /// fn example_add<T, U>()
 /// where
-///     (): IsDefined<{ T + U }>,
+///     [(); T + U]:,
 /// {
 /// }
 /// ```
 ///
 /// ```rust
-/// use op_result::op_result;
-/// use op_result::output;
-///
+/// # use op_result::op_result;
+/// # use op_result::output;
 /// #[op_result]
 /// fn example_sub<T, U>()
 /// where
-///     (): IsDefined<{ T - U }>,
-///     (): IsDefined<{ output!(T - U) - U }>,
+///     [(); T - U]:,
+///     [(); output!(T - U) - U]:,
 /// {
 /// }
 /// ```

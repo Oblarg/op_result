@@ -3,7 +3,7 @@
 Syntactic sugar for writing associated type algebra. Provides two macros:
 
 - `output!`: Transforms `output!(T + U)` into `<T as std::ops::Add<U>>::Output`. Works recursively for nested operations.
-- `#[op_result]`: Attribute macro that transforms `(): IsDefined<{ ... }>` patterns in where clauses into trait bounds like `T: std::ops::Add<U>`.
+- `#[op_result]`: Attribute macro that transforms operator expressions in where clauses into trait bounds like `T: std::ops::Add<U>`. Supports two syntaxes: `(): IsDefined<{ ... }>` and `[(); ...]:`.
 
 ## Usage
 
@@ -21,7 +21,9 @@ type Complex = output!((i32 + i64) * f32);
 
 ## The `#[op_result]` attribute macro
 
-The `#[op_result]` attribute macro transforms `(): IsDefined<{ ... }>` patterns in where clauses into trait bounds:
+The `#[op_result]` attribute macro transforms operator expressions in where clauses into trait bounds. It supports two syntaxes:
+
+### Syntax 1: `(): IsDefined<{ ... }>`
 
 ```rust
 use op_result::op_result;
@@ -35,10 +37,25 @@ where
 }
 ```
 
+### Syntax 2: `[(); ...]:`
+
+```rust
+use op_result::op_result;
+
+#[op_result]
+fn compute_sum<T, U>(a: T, b: U) -> T
+where
+    [(); T + U]:,  // Expands to: T: std::ops::Add<U>
+{
+    a + b
+}
+```
+
 ### Using `output!` with `#[op_result]`
 
-The `output!` macro can be used inside `IsDefined` expressions to specify bounds on operation results:
+The `output!` macro can be used inside both syntaxes to specify bounds on operation results:
 
+**With `IsDefined` syntax:**
 ```rust
 use op_result::op_result;
 use op_result::output;
@@ -53,9 +70,24 @@ where
 }
 ```
 
+**With bracket syntax:**
+```rust
+use op_result::op_result;
+use op_result::output;
+
+#[op_result]
+fn compute_nested<T, U, V>(a: T, b: U, c: V) -> output!(T + U + V)
+where
+    [(); T + U]:,                                // T: std::ops::Add<U>
+    [(); output!(T + U) + V]:,                   // <T as std::ops::Add<U>>::Output: std::ops::Add<V>
+{
+    a + b + c
+}
+```
+
 ### How it works
 
-Normal macros cannot be used in where clauses. The `#[op_result]` attribute macro processes the entire function and transforms `IsDefined` patterns before the compiler sees them, enabling operator syntax in trait bounds.
+Normal macros cannot be used in where clauses. The `#[op_result]` attribute macro processes the entire function and transforms operator expressions (using either `IsDefined` or bracket syntax) into trait bounds before the compiler sees them, enabling operator syntax in trait bounds.
 
 ## Examples
 
@@ -76,6 +108,7 @@ pub struct PIDController<
 
 Using `#[op_result]` to specify trait bounds in where clauses:
 
+**With `IsDefined` syntax:**
 ```rust
 use op_result::op_result;
 use op_result::output;
@@ -85,6 +118,21 @@ fn process_data<T, U, V>(data: T, scale: U, offset: V) -> output!((T * U) + V)
 where
     (): IsDefined<{ T * U }>,
     (): IsDefined<{ output!(T * U) + V }>,
+{
+    (data * scale) + offset
+}
+```
+
+**With bracket syntax:**
+```rust
+use op_result::op_result;
+use op_result::output;
+
+#[op_result]
+fn process_data<T, U, V>(data: T, scale: U, offset: V) -> output!((T * U) + V)
+where
+    [(); T * U]:,
+    [(); output!(T * U) + V]:,
 {
     (data * scale) + offset
 }
