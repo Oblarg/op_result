@@ -1,57 +1,65 @@
 # op_result
 
-Thin syntactic sugar for writing associated type algebra. Transforms `output!(T + U)` into `<T as std::ops::Add<U>>::Output`, and so on recursively for nested operations.
+Syntactic sugar for writing associated type algebra. Provides two macros:
 
-## What it does
+- `output!`: Transforms `output!(T + U)` into `<T as std::ops::Add<U>>::Output`. Works recursively for nested operations.
+- `#[op_result]`: Attribute macro that transforms `(): IsDefined<{ ... }>` patterns in where clauses into trait bounds like `T: std::ops::Add<U>`.
 
-Instead of writing verbose associated type syntax like:
+## Usage
 
-```rust
-fn compute_sum<T, U>() 
-where
-    T: std::ops::Add<U>,
-{
-    type Sum = <T as std::ops::Add<U>>::Output;
-    // ...
-}
-
-fn compute_complex<T, U, V>()
-where
-    T: std::ops::Add<U>,
-    <T as std::ops::Add<U>>::Output: std::ops::Mul<V>,
-{
-    type Complex = <<T as std::ops::Add<U>>::Output as std::ops::Mul<V>>::Output;
-    // ...
-}
-```
-
-You can write:
+The `output!` macro expands operator expressions to associated type outputs. For example:
 
 ```rust
 use op_result::output;
 
-fn compute_sum<T, U>() 
-where
-    T: std::ops::Add<U>,
-{
-    type Sum = output!(T + U);
-    // ...
-}
+type Sum = output!(i32 + i64);
+// Expands to: <i32 as std::ops::Add<i64>>::Output
 
-fn compute_complex<T, U, V>()
+type Complex = output!((i32 + i64) * f32);
+// Expands to: <<i32 as std::ops::Add<i64>>::Output as std::ops::Mul<f32>>::Output
+```
+
+## The `#[op_result]` attribute macro
+
+The `#[op_result]` attribute macro transforms `(): IsDefined<{ ... }>` patterns in where clauses into trait bounds:
+
+```rust
+use op_result::op_result;
+
+#[op_result]
+fn compute_sum<T, U>(a: T, b: U) -> T
 where
-    T: std::ops::Add<U>,
-    output!(T + U): std::ops::Mul<V>,
+    (): IsDefined<{ T + U }>,  // Expands to: T: std::ops::Add<U>
 {
-    type Complex = output!((T + U) * V);
-    // ...
+    a + b
 }
 ```
 
-## When to use it
+### Using `output!` with `#[op_result]`
 
-Useful when you need to assert the legality of arithmetic operations to allow their
-use in generic contexts, and/or define aliases for result types of operations. For example:
+The `output!` macro can be used inside `IsDefined` expressions to specify bounds on operation results:
+
+```rust
+use op_result::op_result;
+use op_result::output;
+
+#[op_result]
+fn compute_nested<T, U, V>(a: T, b: U, c: V) -> output!(T + U + V)
+where
+    (): IsDefined<{ T + U }>,                    // T: std::ops::Add<U>
+    (): IsDefined<{ output!(T + U) + V }>,      // <T as std::ops::Add<U>>::Output: std::ops::Add<V>
+{
+    a + b + c
+}
+```
+
+### How it works
+
+Normal macros cannot be used in where clauses. The `#[op_result]` attribute macro processes the entire function and transforms `IsDefined` patterns before the compiler sees them, enabling operator syntax in trait bounds.
+
+## Examples
+
+Using `output!` to define type aliases for operation results:
 
 ```rust
 pub struct PIDController<
@@ -66,9 +74,27 @@ pub struct PIDController<
 }
 ```
 
+Using `#[op_result]` to specify trait bounds in where clauses:
+
+```rust
+use op_result::op_result;
+use op_result::output;
+
+#[op_result]
+fn process_data<T, U, V>(data: T, scale: U, offset: V) -> output!((T * U) + V)
+where
+    (): IsDefined<{ T * U }>,
+    (): IsDefined<{ output!(T * U) + V }>,
+{
+    (data * scale) + offset
+}
+```
+
 ## Supported operators
 
-All `std::ops` binary operators with associated `Output` types:
+All `std::ops` binary and unary operators with associated `Output` types:
+
+### Binary operators
 
 - `+` → `Add`
 - `-` → `Sub`
@@ -80,6 +106,13 @@ All `std::ops` binary operators with associated `Output` types:
 - `^` → `BitXor`
 - `<<` → `Shl`
 - `>>` → `Shr`
+
+### Unary operators
+
+- `!` → `Not`
+- `-` → `Neg` (unary negation)
+
+Both macros support all of these operators. Comparison and logical operators (`==`, `&&`, `||`, etc.) are not supported as they don't have associated `Output` types in `std::ops`.
 
 ## License
 
