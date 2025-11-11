@@ -5,19 +5,25 @@ use syn::{Expr, ExprBinary, ExprUnary, ItemFn};
 
 use crate::utils;
 
-#[derive(Default)]
 struct OpResultConfig {
     well_formedness_syntax: bool,  // true = enable well-formedness syntax [(); ...]:
     marker_trait_syntax: bool,      // true = enable marker trait syntax (): IsDefined<{...}>
+    marker_trait_name: String,       // name of the marker trait (default: "IsDefined")
+}
+
+impl Default for OpResultConfig {
+    fn default() -> Self {
+        OpResultConfig {
+            well_formedness_syntax: true,
+            marker_trait_syntax: true,
+            marker_trait_name: "IsDefined".to_string(),
+        }
+    }
 }
 
 fn parse_attr(attr: TokenStream) -> OpResultConfig {
     let attr_ts = proc_macro2::TokenStream::from(attr);
     let mut config = OpResultConfig::default();
-    
-    // Default: both syntaxes enabled (support both syntaxes)
-    config.well_formedness_syntax = true;
-    config.marker_trait_syntax = true;
     
     // If attribute is empty, use defaults
     if attr_ts.is_empty() {
@@ -26,25 +32,45 @@ fn parse_attr(attr: TokenStream) -> OpResultConfig {
     
     // Parse the attribute tokens
     let tokens: Vec<proc_macro2::TokenTree> = attr_ts.into_iter().collect();
+    let mut iter = tokens.iter().peekable();
     
-    for tt in tokens {
-        // Skip commas and punctuation
-        if let proc_macro2::TokenTree::Punct(p) = &tt {
-            if p.as_char() == ',' {
-                continue;
-            }
-        }
-        
+    while let Some(tt) = iter.next() {
         // Check for identifier flags
-        if let proc_macro2::TokenTree::Ident(ident) = &tt {
-            if ident == "marker_trait_syntax" {
+        if let proc_macro2::TokenTree::Ident(ident) = tt {
+            let ident_str = ident.to_string();
+            
+            if ident_str == "marker_trait_syntax" {
                 // marker_trait_syntax means only marker trait syntax, disable well-formedness
                 config.marker_trait_syntax = true;
                 config.well_formedness_syntax = false;
-            } else if ident == "well_formedness_syntax" {
+                
+                // Check for optional second parameter (trait name)
+                if let Some(proc_macro2::TokenTree::Punct(comma)) = iter.peek() {
+                    if comma.as_char() == ',' {
+                        iter.next(); // consume comma
+                        if let Some(proc_macro2::TokenTree::Ident(trait_ident)) = iter.next() {
+                            config.marker_trait_name = trait_ident.to_string();
+                        }
+                    }
+                }
+            } else if ident_str == "well_formedness_syntax" {
                 // well_formedness_syntax means only well-formedness syntax, disable marker trait
                 config.well_formedness_syntax = true;
                 config.marker_trait_syntax = false;
+            } else if ident_str == "any_syntax" {
+                // any_syntax means both syntaxes enabled (default behavior)
+                config.well_formedness_syntax = true;
+                config.marker_trait_syntax = true;
+                
+                // Check for optional second parameter (trait name)
+                if let Some(proc_macro2::TokenTree::Punct(comma)) = iter.peek() {
+                    if comma.as_char() == ',' {
+                        iter.next(); // consume comma
+                        if let Some(proc_macro2::TokenTree::Ident(trait_ident)) = iter.next() {
+                            config.marker_trait_name = trait_ident.to_string();
+                        }
+                    }
+                }
             }
         }
     }
@@ -54,6 +80,7 @@ fn parse_attr(attr: TokenStream) -> OpResultConfig {
 
 pub fn expand_op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
     let config = parse_attr(attr);
+    let marker_trait_name = config.marker_trait_name.clone();
     
     // Process the entire token stream, find `(): IsDefined<{...}>` patterns and transform them
     let item_ts = proc_macro2::TokenStream::from(item);
@@ -68,12 +95,12 @@ pub fn expand_op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
             // Each shows what that specific usage expands to
             let mut defined_types = proc_macro2::TokenStream::new();
             
-            // Create a type alias for each IsDefined usage with its specific expansion
+            // Create a type alias for each marker trait usage with its specific expansion
             // Each is in its own throwaway function scope so they don't conflict
             for (_idx, (span, expansion)) in defined_expansions.iter().enumerate() {
                 let expansion_str: String = expansion.to_string();
                 let expansion_doc = format!("**Expands to:** `{}`", expansion_str);
-                let defined_ident = proc_macro2::Ident::new("IsDefined", *span);
+                let defined_ident = proc_macro2::Ident::new(&marker_trait_name, *span);
                 let throwaway_fn  = quote! {
                     #[allow(dead_code)]
                     let _: () = {
@@ -176,7 +203,7 @@ fn expand_defined_in_token_tree(tt: proc_macro2::TokenStream, config: OpResultCo
                 if group1.delimiter() == proc_macro2::Delimiter::Parenthesis && 
                    group1.stream().is_empty() &&
                    colon.as_char() == ':' &&
-                   ident.to_string() == "IsDefined" {
+                   ident.to_string() == config.marker_trait_name {
                     // Found `(): IsDefined` - check if next is `<{...}>` (const generic syntax)
                     let defined_span = ident.span();
                     

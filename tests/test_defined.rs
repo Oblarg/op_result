@@ -199,3 +199,45 @@ fn test_well_formedness_syntax_flag() {
 
     assert_eq!(test(1, 2), 3);
 }
+
+#[test]
+fn test_any_syntax_flag() {
+    // Test that any_syntax enables both syntaxes (same as default)
+    #[op_result(any_syntax)]
+    fn test<T, U>(a: T, b: U) -> output!(T + U)
+    where
+        [(); T + U]:,
+        (): IsDefined<{ T + U }>,
+    {
+        a + b
+    }
+
+    assert_eq!(test(1, 2), 3);
+}
+
+#[test]
+fn test_custom_trait_name_with_marker_trait_syntax() {    
+    #[op_result(marker_trait_syntax, MyTrait)]
+    fn test<T, U>(a: T, b: U) -> output!(T + U)
+    where
+        (): MyTrait<{ T + U }>,
+    {
+        a + b
+    }
+
+    assert_eq!(test(1, 2), 3);
+}
+
+#[test]
+fn test_custom_trait_name_with_any_syntax() {
+    #[op_result(any_syntax, MyCustomTrait)]
+    fn test<T, U>(a: T, b: U) -> output!(T + U)
+    where
+        [(); T + U]:,
+        (): MyCustomTrait<{ T + U }>,
+    {
+        a + b
+    }
+
+    assert_eq!(test(1, 2), 3);
+}

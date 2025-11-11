@@ -80,6 +80,19 @@ where
 
 Both `[(); ...]:` and `(): IsDefined<{ ... }>` syntaxes are supported.
 
+### Syntax Controls
+
+You can control which syntaxes are processed using attribute parameters:
+
+- `#[op_result]` - Default: both syntaxes enabled, uses `IsDefined` as the marker trait name
+- `#[op_result(any_syntax)]` - Explicitly enable both syntaxes
+- `#[op_result(any_syntax, TraitName)]` - Enable both syntaxes with a custom marker trait name
+- `#[op_result(marker_trait_syntax)]` - Only process `(): IsDefined<{ ... }>` syntax
+- `#[op_result(marker_trait_syntax, TraitName)]` - Only process marker trait syntax with a custom trait name
+- `#[op_result(well_formedness_syntax)]` - Only process `[(); ...]:` syntax
+
+The optional second parameter (trait name) defaults to `IsDefined` and is only valid with `marker_trait_syntax` or `any_syntax`.
+
 ## Supported Operators
 
 All binary and unary operators from `core::ops` that have an associated `Output` type:

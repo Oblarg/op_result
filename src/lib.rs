@@ -94,12 +94,17 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// ```rust,ignore
 /// #[op_result]
 /// #[op_result(marker_trait_syntax)]
+/// #[op_result(marker_trait_syntax, TraitName)]
 /// #[op_result(well_formedness_syntax)]
+/// #[op_result(any_syntax)]
+/// #[op_result(any_syntax, TraitName)]
 /// fn <fn_name>()
 /// where
 ///     [(); <expr>]:, // "well-formedness" syntax
 ///     // or, equivalently,
-///     (): IsDefined<{ <expr> }>, // "marker trait" syntax
+///     (): IsDefined<{ <expr> }>, // "marker trait" syntax (default trait name)
+///     // or, with custom trait name,
+///     (): TraitName<{ <expr> }>, // "marker trait" syntax (custom trait name)
 /// {
 /// }
 /// ```
@@ -110,6 +115,13 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// Alternatively, you can disable marker trait syntax parsing by using `#[op_result(well_formedness_syntax)]`,
 /// which will only process `[(); <expr>]:` syntax. The `IsDefined<>` syntax is uniquely detectable
 /// and will not conflict with const generics.
+/// 
+/// You can also use `#[op_result(any_syntax)]` to explicitly enable both syntaxes (same as default).
+/// 
+/// An optional second parameter can be provided to specify a custom marker trait name (defaults to `IsDefined`).
+/// This parameter is only valid with `marker_trait_syntax` or `any_syntax`. For example:
+/// - `#[op_result(marker_trait_syntax, MyTrait)]` - only processes `(): MyTrait<{ <expr> }>` syntax
+/// - `#[op_result(any_syntax, MyTrait)]` - processes both `[(); <expr>]:` and `(): MyTrait<{ <expr> }>` syntax
 /// 
 /// where `<expr>` is any valid operator bound expression. An "operator bound expression" is:
 ///  - A unary operator expression, e.g. `!T` or `-T` (equivalent to `T: Not` or `T: Neg`)
