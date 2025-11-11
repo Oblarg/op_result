@@ -104,7 +104,7 @@ fn test_impl_block_with_where_clause() {
     #[op_result]
     impl<T> Wrapper<T>
     where
-        [(); T + T]:,
+        [(); T + T / T = T]:,
         T: Copy,
     {
         fn double(self) -> output!(T + T) {

@@ -4,7 +4,6 @@ use quote::{quote, quote_spanned};
 use syn::{Expr, ExprBinary, ExprUnary, Item, ItemFn};
 
 use crate::utils;
-use crate::output;
 
 #[derive(Clone)]
 struct OpResultConfig {
@@ -507,27 +506,94 @@ fn expand_expr_to_bound(expr: &Expr, output_assign: Option<&Expr>) -> Option<pro
             }
             
             // Not a chain, or operators don't match - treat as simple binary expression
-            // If left is a complex expression, we need to recursively expand it to build nested bounds
-            if matches!(left.as_ref(), Expr::Binary(_) | Expr::Unary(_)) {
-                // Left is a binary or unary expression - recursively expand it to get nested bounds
-                // Then use its Output type in the current bound
-                if let Some(left_bound) = expand_expr_to_bound(left.as_ref(), None) {
-                    // Extract the base type from the left bound and build nested Output bounds
-                    // For example, if left_bound is "T: Mul<U, Output: Mul<U>>", we want:
-                    // "<T as Mul<U, Output: Mul<U>>>::Output: Div<U, Output = V>"
-                    let left_output_type = output::expand_expr(left.as_ref());
+            // Check if right is a complex expression - if so, nest the right's bound inside current Output
+            if matches!(right.as_ref(), Expr::Binary(_) | Expr::Unary(_)) {
+                // Right is a binary or unary expression - nest the right's bound inside current Output
+                // For example, T + (T / T) = T should become: T: Add<T, Output: Div<T, Output = T>>
+                if let Expr::Binary(ExprBinary { left: right_left, op: right_op, right: right_right, .. }) = right.as_ref() {
+                    let right_op_span = utils::get_op_span(right_op);
+                    let right_trait_name = utils::op_to_trait_spanned(right_op, right_op_span);
                     
-                    let mut generic_params = quote! { #right };
-                    if let Some(output) = output_assign {
-                        generic_params = quote! { #right, Output = #output };
-                    }
+                    let nested_output = if let Some(output) = output_assign {
+                        quote! { Output: core::ops::#right_trait_name<#right_right, Output = #output> }
+                    } else {
+                        quote! { Output: core::ops::#right_trait_name<#right_right> }
+                    };
                     
-                    // Generate both the left bound and the current bound
+                    let trait_spanned = quote_spanned! { op_span => core::ops::#trait_name };
+                    let generic_params = quote! { #right_left, #nested_output };
+                    
                     return Some(quote! {
-                        #left_bound,
-                        #left_output_type: core::ops::#trait_name<#generic_params>
+                        #left: #trait_spanned<#generic_params>
+                    });
+                } else if let Expr::Unary(ExprUnary { op: right_op, expr: right_expr, .. }) = right.as_ref() {
+                    let right_op_span = utils::get_un_op_span(right_op);
+                    let right_trait_name = utils::un_op_to_trait_spanned(right_op, right_op_span);
+                    
+                    let nested_output = if let Some(output) = output_assign {
+                        quote! { Output: core::ops::#right_trait_name<Output = #output> }
+                    } else {
+                        quote! { Output: core::ops::#right_trait_name }
+                    };
+                    
+                    let trait_spanned = quote_spanned! { op_span => core::ops::#trait_name };
+                    return Some(quote! {
+                        #left: #trait_spanned<#right_expr, #nested_output>
                     });
                 }
+            }
+            
+            // If left is a complex expression, we need to recursively expand it to build nested bounds
+            if matches!(left.as_ref(), Expr::Binary(_) | Expr::Unary(_)) {
+                // Left is a binary or unary expression - nest the current bound inside the left's Output
+                // For example, T + T / T = T should become: T: Add<T, Output: Div<T, Output = T>>
+                let left_op_span = if let Expr::Binary(ExprBinary { op: left_op, .. }) = left.as_ref() {
+                    utils::get_op_span(left_op)
+                } else if let Expr::Unary(ExprUnary { op: left_op, .. }) = left.as_ref() {
+                    utils::get_un_op_span(left_op)
+                } else {
+                    return None;
+                };
+                
+                let left_trait_name = if let Expr::Binary(ExprBinary { op: left_op, .. }) = left.as_ref() {
+                    utils::op_to_trait_spanned(left_op, left_op_span)
+                } else if let Expr::Unary(ExprUnary { op: left_op, .. }) = left.as_ref() {
+                    utils::un_op_to_trait_spanned(left_op, left_op_span)
+                } else {
+                    return None;
+                };
+                
+                // Extract the base type and right operand from the left expression
+                let (left_base, left_right_operand) = if let Expr::Binary(ExprBinary { left: base, right: right_op, .. }) = left.as_ref() {
+                    (base.clone(), right_op.clone())
+                } else if let Expr::Unary(ExprUnary { expr: inner, .. }) = left.as_ref() {
+                    (inner.clone(), inner.clone()) // For unary, use the inner expr as both
+                } else {
+                    return None;
+                };
+                
+                // Build nested bound: left_base: Trait<left_right, Output: current_trait<right, Output = output>>
+                let nested_output = if let Some(output) = output_assign {
+                    quote! { Output: core::ops::#trait_name<#right, Output = #output> }
+                } else {
+                    // If right is also complex, recursively expand it
+                    if matches!(right.as_ref(), Expr::Binary(_) | Expr::Unary(_)) {
+                        if let Some(right_bound) = expand_expr_to_bound(right.as_ref(), None) {
+                            quote! { Output: core::ops::#trait_name<#right, #right_bound> }
+                        } else {
+                            quote! { Output: core::ops::#trait_name<#right> }
+                        }
+                    } else {
+                        quote! { Output: core::ops::#trait_name<#right> }
+                    }
+                };
+                
+                let left_trait_spanned = quote_spanned! { left_op_span => core::ops::#left_trait_name };
+                let generic_params = quote! { #left_right_operand, #nested_output };
+                
+                return Some(quote! {
+                    #left_base: #left_trait_spanned<#generic_params>
+                });
             }
             
             // Left is a simple type identifier - use it directly
