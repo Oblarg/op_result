@@ -1,11 +1,12 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{quote, quote_spanned};
-use syn::{Expr, ExprBinary, ExprUnary, ItemFn};
+use syn::{Expr, ExprBinary, ExprUnary, Item, ItemFn};
 
 use crate::utils;
 use crate::output;
 
+#[derive(Clone)]
 struct OpResultConfig {
     well_formedness_syntax: bool,  // true = enable well-formedness syntax [(); ...]:
     marker_trait_syntax: bool,      // true = enable marker trait syntax (): IsDefined<{...}>
@@ -87,17 +88,17 @@ pub fn expand_op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_ts = proc_macro2::TokenStream::from(item);
     
     // Expand all `(): IsDefined<{...}>` patterns in the token stream
-    let (expanded_ts, defined_expansions) = expand_defined_in_tokens(item_ts, config);
+    let (expanded_ts, defined_expansions) = expand_defined_in_tokens(item_ts, config.clone());
     
-    // Now parse the function with the expanded where clause
-    match syn::parse2::<ItemFn>(expanded_ts) {
-        Ok(item_fn) => {
+    // Try to parse as different item types
+    match syn::parse2::<Item>(expanded_ts.clone()) {
+        Ok(item) => {
+            // Recursively process the item and all nested items
+            let processed_item = process_item_recursive(item, config);
+            
             // Create type aliases for IDE hover support - one for each IsDefined usage
-            // Each shows what that specific usage expands to
             let mut defined_types = proc_macro2::TokenStream::new();
             
-            // Create a type alias for each marker trait usage with its specific expansion
-            // Each is in its own throwaway function scope so they don't conflict
             for (_idx, (span, expansion)) in defined_expansions.iter().enumerate() {
                 let expansion_str: String = expansion.to_string();
                 let expansion_doc = format!("**Expands to:** `{}`", expansion_str);
@@ -114,19 +115,206 @@ pub fn expand_op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
                 defined_types.extend(throwaway_fn);
             }
             
-            // Successfully parsed - quote it back with the type definitions
-            // This preserves all macro invocations (including `output!`) in the function body
             TokenStream::from(quote! {
                 const _: () = {
                     #defined_types
                 };
-                #item_fn
+                #processed_item
             })
         }
-        Err(e) => {
-            // If parsing fails, return a compile error
-            TokenStream::from(e.to_compile_error())
+        Err(_) => {
+            // If parsing as Item fails, try parsing as ItemFn for backward compatibility
+            match syn::parse2::<ItemFn>(expanded_ts) {
+                Ok(item_fn) => {
+                    let mut defined_types = proc_macro2::TokenStream::new();
+                    
+                    for (_idx, (span, expansion)) in defined_expansions.iter().enumerate() {
+                        let expansion_str: String = expansion.to_string();
+                        let expansion_doc = format!("**Expands to:** `{}`", expansion_str);
+                        let defined_ident = proc_macro2::Ident::new(&marker_trait_name, *span);
+                        let throwaway_fn  = quote! {
+                            #[allow(dead_code)]
+                            let _: () = {
+                                /// An operator bound expression.
+                                ///
+                                #[doc = #expansion_doc]
+                                type #defined_ident = ();
+                            };
+                        };
+                        defined_types.extend(throwaway_fn);
+                    }
+                    
+                    TokenStream::from(quote! {
+                        const _: () = {
+                            #defined_types
+                        };
+                        #item_fn
+                    })
+                }
+                Err(e) => {
+                    TokenStream::from(e.to_compile_error())
+                }
+            }
         }
+    }
+}
+
+// Recursively processes an item and all nested items, processing where clauses in each
+fn process_item_recursive(item: Item, config: OpResultConfig) -> proc_macro2::TokenStream {
+    match item {
+        Item::Fn(item_fn) => {
+            // Process nested items in the function body (e.g., nested functions, impl blocks, etc.)
+            // Note: function bodies are expressions/blocks, not items, so we process the where clause
+            // The where clause is already processed at the token level, so we just need to handle nested items
+            // For functions, we can't have nested items in the body, so we just return the function
+            quote! { #item_fn }
+        }
+        Item::Struct(item_struct) => {
+            // Process where clause (already done at token level)
+            // Process nested items if any (structs can't have nested items in Rust)
+            quote! { #item_struct }
+        }
+        Item::Enum(item_enum) => {
+            // Process where clause (already done at token level)
+            // Process nested items if any (enums can't have nested items)
+            quote! { #item_enum }
+        }
+        Item::Impl(mut item_impl) => {
+            // Process where clause (already done at token level)
+            // Recursively process all associated items (methods, associated types, etc.)
+            let mut processed_items = Vec::new();
+            
+            for item in item_impl.items.iter() {
+                let processed = process_impl_item(item.clone(), config.clone());
+                processed_items.push(processed);
+            }
+            
+            item_impl.items = processed_items;
+            quote! { #item_impl }
+        }
+        Item::Trait(mut item_trait) => {
+            // Process where clause (already done at token level)
+            // Recursively process all associated items
+            let mut processed_items = Vec::new();
+            
+            for item in item_trait.items.iter() {
+                let processed = process_trait_item(item.clone(), config.clone());
+                processed_items.push(processed);
+            }
+            
+            item_trait.items = processed_items;
+            quote! { #item_trait }
+        }
+        Item::Type(item_type) => {
+            // Process where clause (already done at token level)
+            quote! { #item_type }
+        }
+        Item::Mod(mut item_mod) => {
+            // Process nested items in the module
+            if let Some((_, ref mut items)) = item_mod.content {
+                let mut processed_items = Vec::new();
+                for item in items.iter() {
+                    let processed_ts = process_item_recursive(item.clone(), config.clone());
+                    // Parse the processed token stream back to an item
+                    match syn::parse2::<Item>(processed_ts) {
+                        Ok(processed_item) => processed_items.push(processed_item),
+                        Err(_) => processed_items.push(item.clone()), // Fallback to original
+                    }
+                }
+                *items = processed_items;
+            }
+            quote! { #item_mod }
+        }
+        Item::Const(item_const) => {
+            quote! { #item_const }
+        }
+        Item::Static(item_static) => {
+            quote! { #item_static }
+        }
+        Item::ForeignMod(item_foreign) => {
+            quote! { #item_foreign }
+        }
+        Item::Use(item_use) => {
+            quote! { #item_use }
+        }
+        Item::Macro(item_macro) => {
+            quote! { #item_macro }
+        }
+        Item::Verbatim(item_verbatim) => {
+            quote! { #item_verbatim }
+        }
+        _ => {
+            // For any other item type, just quote it as-is
+            quote! { #item }
+        }
+    }
+}
+
+// Process an impl item (method, associated type, etc.)
+fn process_impl_item(item: syn::ImplItem, config: OpResultConfig) -> syn::ImplItem {
+    match item {
+        syn::ImplItem::Fn(method) => {
+            // Process the method's where clause recursively
+            let method_ts = quote! { #method };
+            let (expanded_ts, _) = expand_defined_in_tokens(method_ts, config);
+            match syn::parse2::<syn::ImplItem>(expanded_ts) {
+                Ok(processed) => processed,
+                Err(_) => syn::ImplItem::Fn(method), // Fallback to original
+            }
+        }
+        syn::ImplItem::Type(ty) => {
+            // Process the associated type's where clause
+            let ty_ts = quote! { #ty };
+            let (expanded_ts, _) = expand_defined_in_tokens(ty_ts, config);
+            match syn::parse2::<syn::ImplItem>(expanded_ts) {
+                Ok(processed) => processed,
+                Err(_) => syn::ImplItem::Type(ty), // Fallback to original
+            }
+        }
+        syn::ImplItem::Const(item_const) => {
+            syn::ImplItem::Const(item_const)
+        }
+        syn::ImplItem::Macro(item_macro) => {
+            syn::ImplItem::Macro(item_macro)
+        }
+        syn::ImplItem::Verbatim(item_verbatim) => {
+            syn::ImplItem::Verbatim(item_verbatim)
+        }
+        _ => item,
+    }
+}
+
+// Process a trait item (method, associated type, etc.)
+fn process_trait_item(item: syn::TraitItem, config: OpResultConfig) -> syn::TraitItem {
+    match item {
+        syn::TraitItem::Fn(method) => {
+            // Process the method's where clause recursively
+            let method_ts = quote! { #method };
+            let (expanded_ts, _) = expand_defined_in_tokens(method_ts, config);
+            match syn::parse2::<syn::TraitItem>(expanded_ts) {
+                Ok(processed) => processed,
+                Err(_) => syn::TraitItem::Fn(method), // Fallback to original
+            }
+        }
+        syn::TraitItem::Type(ty) => {
+            // Process the associated type's where clause
+            let ty_ts = quote! { #ty };
+            let (expanded_ts, _) = expand_defined_in_tokens(ty_ts, config);
+            match syn::parse2::<syn::TraitItem>(expanded_ts) {
+                Ok(processed) => processed,
+                Err(_) => syn::TraitItem::Type(ty), // Fallback to original
+            }
+        }
+        syn::TraitItem::Const(item_const) => {
+            syn::TraitItem::Const(item_const)
+        }
+        syn::TraitItem::Macro(item_macro) => {
+            syn::TraitItem::Macro(item_macro)
+        }
+        syn::TraitItem::Verbatim(item_verbatim) => {
+            syn::TraitItem::Verbatim(item_verbatim)
+        }
+        _ => item,
     }
 }
 
