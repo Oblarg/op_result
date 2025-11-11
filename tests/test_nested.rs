@@ -96,3 +96,45 @@ fn test_trait_with_nested_method_where_clause() {
     assert_eq!(result, 3);
 }
 
+#[test]
+fn test_impl_block_with_where_clause() {
+    struct Wrapper<T>(T);
+
+    // Test that where clause on impl block itself works
+    #[op_result]
+    impl<T> Wrapper<T>
+    where
+        [(); T + T]:,
+        T: Copy,
+    {
+        fn double(self) -> output!(T + T) {
+            self.0 + self.0
+        }
+    }
+
+    let w = Wrapper(1);
+    assert_eq!(w.double(), 2);
+}
+
+#[test]
+fn test_impl_block_with_where_clause_and_method_where_clause() {
+    struct Wrapper<T>(T);
+
+    // Test that both impl block where clause and method where clause work
+    #[op_result]
+    impl<T> Wrapper<T>
+    where
+        [(); T + T]:,
+    {
+        fn add<U>(self, other: U) -> output!(T + U)
+        where
+            [(); T + U]:,
+        {
+            self.0 + other
+        }
+    }
+
+    let w = Wrapper(1);
+    assert_eq!(w.add(2), 3);
+}
+
