@@ -25,19 +25,19 @@
 //! 
 //! ## Supported Operators
 //!
-//! All binary and unary operators from `std::ops` that have an associated `Output` type:
-//! - `+` → [`std::ops::Add`](https://doc.rust-lang.org/std/ops/trait.Add.html)
-//! - `-` → [`std::ops::Sub`](https://doc.rust-lang.org/std/ops/trait.Sub.html)
-//! - `*` → [`std::ops::Mul`](https://doc.rust-lang.org/std/ops/trait.Mul.html)
-//! - `/` → [`std::ops::Div`](https://doc.rust-lang.org/std/ops/trait.Div.html)
-//! - `%` → [`std::ops::Rem`](https://doc.rust-lang.org/std/ops/trait.Rem.html)
-//! - `&` → [`std::ops::BitAnd`](https://doc.rust-lang.org/std/ops/trait.BitAnd.html)
-//! - `|` → [`std::ops::BitOr`](https://doc.rust-lang.org/std/ops/trait.BitOr.html)
-//! - `^` → [`std::ops::BitXor`](https://doc.rust-lang.org/std/ops/trait.BitXor.html)
-//! - `<<` → [`std::ops::Shl`](https://doc.rust-lang.org/std/ops/trait.Shl.html)
-//! - `>>` → [`std::ops::Shr`](https://doc.rust-lang.org/std/ops/trait.Shr.html)
-//! - `!` → [`std::ops::Not`](https://doc.rust-lang.org/std/ops/trait.Not.html) (unary operator)
-//! - `-` → [`std::ops::Neg`](https://doc.rust-lang.org/std/ops/trait.Neg.html) (unary operator)
+//! All binary and unary operators from `core::ops` that have an associated `Output` type:
+//! - `+` → [`core::ops::Add`](https://doc.rust-lang.org/core/ops/trait.Add.html)
+//! - `-` → [`core::ops::Sub`](https://doc.rust-lang.org/core/ops/trait.Sub.html)
+//! - `*` → [`core::ops::Mul`](https://doc.rust-lang.org/core/ops/trait.Mul.html)
+//! - `/` → [`core::ops::Div`](https://doc.rust-lang.org/core/ops/trait.Div.html)
+//! - `%` → [`core::ops::Rem`](https://doc.rust-lang.org/core/ops/trait.Rem.html)
+//! - `&` → [`core::ops::BitAnd`](https://doc.rust-lang.org/core/ops/trait.BitAnd.html)
+//! - `|` → [`core::ops::BitOr`](https://doc.rust-lang.org/core/ops/trait.BitOr.html)
+//! - `^` → [`core::ops::BitXor`](https://doc.rust-lang.org/core/ops/trait.BitXor.html)
+//! - `<<` → [`core::ops::Shl`](https://doc.rust-lang.org/core/ops/trait.Shl.html)
+//! - `>>` → [`core::ops::Shr`](https://doc.rust-lang.org/core/ops/trait.Shr.html)
+//! - `!` → [`core::ops::Not`](https://doc.rust-lang.org/core/ops/trait.Not.html) (unary operator)
+//! - `-` → [`core::ops::Neg`](https://doc.rust-lang.org/core/ops/trait.Neg.html) (unary operator)
 
 mod utils;
 mod output;
@@ -47,7 +47,7 @@ use proc_macro::TokenStream;
 
 /// Expands operator expressions to associated type outputs.
 ///
-/// Transforms `output!(T + U)` into `<T as std::ops::Add<U>>::Output`. Works recursively
+/// Transforms `output!(T + U)` into `<T as core::ops::Add<U>>::Output`. Works recursively
 /// for nested expressions, preserving parentheses for operator precedence.
 /// 
 /// ## Syntax
@@ -57,10 +57,10 @@ use proc_macro::TokenStream;
 /// ```
 /// 
 /// where `<expr>` is any valid operator output expression.  An "operator output expression" is:
-///  - A unary operator expression, e.g. `!T` or `-T` (equivalent to `<T as std::ops::Not>::Output` or `<T as std::ops::Neg>::Output`)
-///  - A binary operator expression, e.g. `T + U` (equivalent to `<T as std::ops::Add<U>>::Output`)
+///  - A unary operator expression, e.g. `!T` or `-T` (equivalent to `<T as core::ops::Not>::Output` or `<T as core::ops::Neg>::Output`)
+///  - A binary operator expression, e.g. `T + U` (equivalent to `<T as core::ops::Add<U>>::Output`)
 ///  - A combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)` 
-///    (equivalent to `<T as std::ops::Add<U, Output: Mul<V>>>::Output` or `<T as std::ops::Add<U, Output: Mul<V, Output: Mul<W>>>>::Output`)
+///    (equivalent to `<T as core::ops::Add<U, Output: Mul<V>>>::Output` or `<T as core::ops::Add<U, Output: Mul<V, Output: Mul<W>>>>::Output`)
 ///
 /// ## Examples
 ///
@@ -93,6 +93,8 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// 
 /// ```rust,ignore
 /// #[op_result]
+/// #[op_result(marker_trait_syntax)]
+/// #[op_result(well_formedness_syntax)]
 /// fn <fn_name>()
 /// where
 ///     [(); <expr>]:, // "well-formedness" syntax
@@ -101,6 +103,13 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// {
 /// }
 /// ```
+/// 
+/// By default, both syntaxes are supported. However, the well-formedness syntax `[(); <expr>]:` may
+/// conflict with const generic syntax in some cases. You can disable well-formedness syntax parsing
+/// by using `#[op_result(marker_trait_syntax)]`, which will only process `(): IsDefined<{ <expr> }>` syntax.
+/// Alternatively, you can disable marker trait syntax parsing by using `#[op_result(well_formedness_syntax)]`,
+/// which will only process `[(); <expr>]:` syntax. The `IsDefined<>` syntax is uniquely detectable
+/// and will not conflict with const generics.
 /// 
 /// where `<expr>` is any valid operator bound expression. An "operator bound expression" is:
 ///  - A unary operator expression, e.g. `!T` or `-T` (equivalent to `T: Not` or `T: Neg`)
@@ -155,6 +164,45 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// }
 ///
 /// let result: i32 = example_output_assignment(1, 2);
+/// assert_eq!(result, 3);
+/// ```
+///
+/// ## Syntax Selection
+///
+/// If you need to use bracket syntax for const generics, you can disable the well-formedness syntax
+/// parsing while still using `IsDefined<>` syntax:
+///
+/// ```rust
+/// # use op_result::op_result;
+/// # use op_result::output;
+/// #[op_result(marker_trait_syntax)]
+/// fn example<T, U>(a: T, b: U) -> output!(T + U)
+/// where
+///     (): IsDefined<{ T + U }>, // Only this syntax is processed
+///     // [(); T + U]:, // This would NOT be transformed if uncommented
+/// {
+///     a + b
+/// }
+///
+/// let result = example(1, 2);
+/// assert_eq!(result, 3);
+/// ```
+///
+/// Alternatively, you can disable marker trait syntax parsing to only use well-formedness syntax:
+///
+/// ```rust
+/// # use op_result::op_result;
+/// # use op_result::output;
+/// #[op_result(well_formedness_syntax)]
+/// fn example<T, U>(a: T, b: U) -> output!(T + U)
+/// where
+///     [(); T + U]:, // Only this syntax is processed
+///     // (): IsDefined<{ T + U }>, // This would NOT be transformed if uncommented
+/// {
+///     a + b
+/// }
+///
+/// let result = example(1, 2);
 /// assert_eq!(result, 3);
 /// ```
 #[proc_macro_attribute]

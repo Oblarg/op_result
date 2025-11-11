@@ -171,3 +171,31 @@ fn test_chained_operator_bounds_three_ops_with_output() {
     let result: i32 = compute_nested_four_with_output(1, 2, 3, 4);
     assert_eq!(result, 10);
 }
+
+#[test]
+fn test_marker_trait_syntax_flag() {
+    // Test that marker_trait_syntax disables well-formedness syntax but keeps IsDefined syntax
+    #[op_result(marker_trait_syntax)]
+    fn test<T, U>(a: T, b: U) -> output!(T + U)
+    where
+        (): IsDefined<{ T + U }>,
+    {
+        a + b
+    }
+
+    assert_eq!(test(1, 2), 3);
+}
+
+#[test]
+fn test_well_formedness_syntax_flag() {
+    // Test that well_formedness_syntax disables marker trait syntax but keeps bracket syntax
+    #[op_result(well_formedness_syntax)]
+    fn test<T, U>(a: T, b: U) -> output!(T + U)
+    where
+        [(); T + U]:,
+    {
+        a + b
+    }
+
+    assert_eq!(test(1, 2), 3);
+}

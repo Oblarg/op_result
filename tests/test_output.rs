@@ -45,70 +45,70 @@ struct ShlOutput(i32);
 struct ShrOutput(i32);
 
 // Implement all the operators
-impl std::ops::Add<AddType> for AddType {
+impl core::ops::Add<AddType> for AddType {
     type Output = AddOutput;
     fn add(self, rhs: AddType) -> Self::Output {
         AddOutput(self.0 + rhs.0)
     }
 }
 
-impl std::ops::Sub<SubType> for SubType {
+impl core::ops::Sub<SubType> for SubType {
     type Output = SubOutput;
     fn sub(self, rhs: SubType) -> Self::Output {
         SubOutput(self.0 - rhs.0)
     }
 }
 
-impl std::ops::Mul<MulType> for MulType {
+impl core::ops::Mul<MulType> for MulType {
     type Output = MulOutput;
     fn mul(self, rhs: MulType) -> Self::Output {
         MulOutput(self.0 * rhs.0)
     }
 }
 
-impl std::ops::Div<DivType> for DivType {
+impl core::ops::Div<DivType> for DivType {
     type Output = DivOutput;
     fn div(self, rhs: DivType) -> Self::Output {
         DivOutput(self.0 / rhs.0)
     }
 }
 
-impl std::ops::Rem<RemType> for RemType {
+impl core::ops::Rem<RemType> for RemType {
     type Output = RemOutput;
     fn rem(self, rhs: RemType) -> Self::Output {
         RemOutput(self.0 % rhs.0)
     }
 }
 
-impl std::ops::BitAnd<BitAndType> for BitAndType {
+impl core::ops::BitAnd<BitAndType> for BitAndType {
     type Output = BitAndOutput;
     fn bitand(self, rhs: BitAndType) -> Self::Output {
         BitAndOutput(self.0 & rhs.0)
     }
 }
 
-impl std::ops::BitOr<BitOrType> for BitOrType {
+impl core::ops::BitOr<BitOrType> for BitOrType {
     type Output = BitOrOutput;
     fn bitor(self, rhs: BitOrType) -> Self::Output {
         BitOrOutput(self.0 | rhs.0)
     }
 }
 
-impl std::ops::BitXor<BitXorType> for BitXorType {
+impl core::ops::BitXor<BitXorType> for BitXorType {
     type Output = BitXorOutput;
     fn bitxor(self, rhs: BitXorType) -> Self::Output {
         BitXorOutput(self.0 ^ rhs.0)
     }
 }
 
-impl std::ops::Shl<ShlType> for ShlType {
+impl core::ops::Shl<ShlType> for ShlType {
     type Output = ShlOutput;
     fn shl(self, rhs: ShlType) -> Self::Output {
         ShlOutput(self.0 << rhs.0)
     }
 }
 
-impl std::ops::Shr<ShrType> for ShrType {
+impl core::ops::Shr<ShrType> for ShrType {
     type Output = ShrOutput;
     fn shr(self, rhs: ShrType) -> Self::Output {
         ShrOutput(self.0 >> rhs.0)
@@ -116,21 +116,21 @@ impl std::ops::Shr<ShrType> for ShrType {
 }
 
 // Additional impls for nested operation tests
-impl std::ops::Mul<MulType> for AddOutput {
+impl core::ops::Mul<MulType> for AddOutput {
     type Output = MulOutput;
     fn mul(self, rhs: MulType) -> Self::Output {
         MulOutput(self.0 * rhs.0)
     }
 }
 
-impl std::ops::Div<DivType> for SubOutput {
+impl core::ops::Div<DivType> for SubOutput {
     type Output = DivOutput;
     fn div(self, rhs: DivType) -> Self::Output {
         DivOutput(self.0 / rhs.0)
     }
 }
 
-impl std::ops::Mul<SubOutput> for AddOutput {
+impl core::ops::Mul<SubOutput> for AddOutput {
     type Output = MulOutput;
     fn mul(self, rhs: SubOutput) -> Self::Output {
         MulOutput(self.0 * rhs.0)

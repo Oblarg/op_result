@@ -20,7 +20,7 @@ fn expand_expr_with_doc(expr: &Expr, _parent_span: Option<Span>) -> proc_macro2:
             // Only apply span to the trait name, not the entire expression
             // This prevents the 'as' keyword from inheriting the operator's span
             quote! {
-                <#left_expanded as std::ops::#trait_name<#right_expanded>>::Output
+                <#left_expanded as core::ops::#trait_name<#right_expanded>>::Output
             }
         }
         Expr::Unary(ExprUnary { op, expr: inner_expr, .. }) => {
@@ -29,7 +29,7 @@ fn expand_expr_with_doc(expr: &Expr, _parent_span: Option<Span>) -> proc_macro2:
             let trait_name = utils::un_op_to_trait_spanned(op, op_span);
             
             quote! {
-                <#inner_expanded as std::ops::#trait_name>::Output
+                <#inner_expanded as core::ops::#trait_name>::Output
             }
         }
         Expr::Paren(expr_paren) => {

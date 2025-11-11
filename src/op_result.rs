@@ -5,12 +5,61 @@ use syn::{Expr, ExprBinary, ExprUnary, ItemFn};
 
 use crate::utils;
 
-pub fn expand_op_result(_attr: TokenStream, item: TokenStream) -> TokenStream {
+#[derive(Default)]
+struct OpResultConfig {
+    well_formedness_syntax: bool,  // true = enable well-formedness syntax [(); ...]:
+    marker_trait_syntax: bool,      // true = enable marker trait syntax (): IsDefined<{...}>
+}
+
+fn parse_attr(attr: TokenStream) -> OpResultConfig {
+    let attr_ts = proc_macro2::TokenStream::from(attr);
+    let mut config = OpResultConfig::default();
+    
+    // Default: both syntaxes enabled (support both syntaxes)
+    config.well_formedness_syntax = true;
+    config.marker_trait_syntax = true;
+    
+    // If attribute is empty, use defaults
+    if attr_ts.is_empty() {
+        return config;
+    }
+    
+    // Parse the attribute tokens
+    let tokens: Vec<proc_macro2::TokenTree> = attr_ts.into_iter().collect();
+    
+    for tt in tokens {
+        // Skip commas and punctuation
+        if let proc_macro2::TokenTree::Punct(p) = &tt {
+            if p.as_char() == ',' {
+                continue;
+            }
+        }
+        
+        // Check for identifier flags
+        if let proc_macro2::TokenTree::Ident(ident) = &tt {
+            if ident == "marker_trait_syntax" {
+                // marker_trait_syntax means only marker trait syntax, disable well-formedness
+                config.marker_trait_syntax = true;
+                config.well_formedness_syntax = false;
+            } else if ident == "well_formedness_syntax" {
+                // well_formedness_syntax means only well-formedness syntax, disable marker trait
+                config.well_formedness_syntax = true;
+                config.marker_trait_syntax = false;
+            }
+        }
+    }
+    
+    config
+}
+
+pub fn expand_op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = parse_attr(attr);
+    
     // Process the entire token stream, find `(): IsDefined<{...}>` patterns and transform them
     let item_ts = proc_macro2::TokenStream::from(item);
     
     // Expand all `(): IsDefined<{...}>` patterns in the token stream
-    let (expanded_ts, defined_expansions) = expand_defined_in_tokens(item_ts);
+    let (expanded_ts, defined_expansions) = expand_defined_in_tokens(item_ts, config);
     
     // Now parse the function with the expanded where clause
     match syn::parse2::<ItemFn>(expanded_ts) {
@@ -53,12 +102,12 @@ pub fn expand_op_result(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-fn expand_defined_in_tokens(tokens: proc_macro2::TokenStream) -> (proc_macro2::TokenStream, Vec<(Span, proc_macro2::TokenStream)>) {
-    expand_defined_in_token_tree(tokens)
+fn expand_defined_in_tokens(tokens: proc_macro2::TokenStream, config: OpResultConfig) -> (proc_macro2::TokenStream, Vec<(Span, proc_macro2::TokenStream)>) {
+    expand_defined_in_token_tree(tokens, config)
 }
 
 
-fn expand_defined_in_token_tree(tt: proc_macro2::TokenStream) -> (proc_macro2::TokenStream, Vec<(Span, proc_macro2::TokenStream)>) {
+fn expand_defined_in_token_tree(tt: proc_macro2::TokenStream, config: OpResultConfig) -> (proc_macro2::TokenStream, Vec<(Span, proc_macro2::TokenStream)>) {
     let mut result = proc_macro2::TokenStream::new();
     let mut iter = tt.into_iter().peekable();
     let mut tokens: Vec<proc_macro2::TokenTree> = Vec::new();
@@ -70,7 +119,8 @@ fn expand_defined_in_token_tree(tt: proc_macro2::TokenStream) -> (proc_macro2::T
         // Look for pattern: `[(); T + U]:`
         // This is a bracket group containing: Group(()), Punct(;), ...expression...
         // followed by a Punct(:) after the bracket group
-        if tokens.len() >= 2 {
+        // Only process if well_formedness_syntax is enabled
+        if config.well_formedness_syntax && tokens.len() >= 2 {
             let len = tokens.len();
             if let (
                 proc_macro2::TokenTree::Group(bracket_group),
@@ -115,7 +165,8 @@ fn expand_defined_in_token_tree(tt: proc_macro2::TokenStream) -> (proc_macro2::T
         
         // Look for pattern: `(): IsDefined<{...}>`
         // This means we need: Group(()), Punct(:), Ident(IsDefined), Punct(<), Group({...}), Punct(>)
-        if tokens.len() >= 3 {
+        // Only process if marker_trait_syntax is enabled
+        if config.marker_trait_syntax && tokens.len() >= 3 {
             let len = tokens.len();
             if let (
                 proc_macro2::TokenTree::Group(group1),
@@ -236,7 +287,7 @@ fn expand_expr_to_bound(expr: &Expr, output_assign: Option<&Expr>) -> Option<pro
             }
             
             Some(quote! {
-                #left: std::ops::#trait_name<#generic_params>
+                #left: core::ops::#trait_name<#generic_params>
             })
         }
         Expr::Unary(ExprUnary { op, expr: inner_expr, .. }) => {
@@ -252,11 +303,11 @@ fn expand_expr_to_bound(expr: &Expr, output_assign: Option<&Expr>) -> Option<pro
             
             if generic_params.is_empty() {
                 Some(quote! {
-                    #inner_expr: std::ops::#trait_name
+                    #inner_expr: core::ops::#trait_name
                 })
             } else {
                 Some(quote! {
-                    #inner_expr: std::ops::#trait_name<#generic_params>
+                    #inner_expr: core::ops::#trait_name<#generic_params>
                 })
             }
         }
@@ -319,7 +370,7 @@ fn build_nested_bound(
     if operations.len() == 1 {
         // Single operation: T: Add<U>
         let (span, trait_name, right) = &operations[0];
-        let trait_spanned = quote_spanned! { *span => std::ops::#trait_name };
+        let trait_spanned = quote_spanned! { *span => core::ops::#trait_name };
         let mut generic_params = quote! { #right };
         if let Some(output) = output_assign {
             generic_params = quote! { #right, Output = #output };
@@ -331,7 +382,7 @@ fn build_nested_bound(
     
     // Multiple operations: build nested Output bounds
     let (last_span, last_trait, last_right) = &operations[operations.len() - 1];
-    let last_trait_spanned = quote_spanned! { *last_span => std::ops::#last_trait };
+    let last_trait_spanned = quote_spanned! { *last_span => core::ops::#last_trait };
     
     // Start with the innermost bound: Output: Add<W> or Output: Add<W, Output = X>
     let mut nested_output = if let Some(output) = output_assign {
@@ -348,7 +399,7 @@ fn build_nested_bound(
     // For T + U + V + W: operations = [(Add, U), (Add, V), (Add, W)]
     // We iterate over [(Add, V)] (skip last, stop before first)
     for (span, trait_name, right) in operations.iter().rev().skip(1).take(operations.len() - 2) {
-        let trait_spanned = quote_spanned! { *span => std::ops::#trait_name };
+        let trait_spanned = quote_spanned! { *span => core::ops::#trait_name };
         nested_output = quote! {
             Output: #trait_spanned<#right, #nested_output>
         };
@@ -356,7 +407,7 @@ fn build_nested_bound(
     
     // Add the outermost operation
     let (first_span, first_trait, first_right) = &operations[0];
-    let first_trait_spanned = quote_spanned! { *first_span => std::ops::#first_trait };
+    let first_trait_spanned = quote_spanned! { *first_span => core::ops::#first_trait };
     
     let generic_params = quote! { #first_right, #nested_output };
     

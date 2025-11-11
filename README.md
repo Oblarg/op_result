@@ -29,7 +29,7 @@ assert_eq!(result, 3);
 
 ### `output!` macro
 
-Transforms `output!(T + U)` into `<T as std::ops::Add<U>>::Output`. Works recursively for nested expressions, preserving parentheses for operator precedence.
+Transforms `output!(T + U)` into `<T as core::ops::Add<U>>::Output`. Works recursively for nested expressions, preserving parentheses for operator precedence.
 
 ```rust
 use op_result::op_result;
@@ -82,19 +82,19 @@ Both `[(); ...]:` and `(): IsDefined<{ ... }>` syntaxes are supported.
 
 ## Supported Operators
 
-All binary and unary operators from `std::ops` that have an associated `Output` type:
-- `+` → [`std::ops::Add`]
-- `-` → [`std::ops::Sub`]
-- `*` → [`std::ops::Mul`]
-- `/` → [`std::ops::Div`]
-- `%` → [`std::ops::Rem`]
-- `&` → [`std::ops::BitAnd`]
-- `|` → [`std::ops::BitOr`]
-- `^` → [`std::ops::BitXor`]
-- `<<` → [`std::ops::Shl`]
-- `>>` → [`std::ops::Shr`]
-- `!` → [`std::ops::Not`] (unary operator)
-- `-` → [`std::ops::Neg`] (unary operator)
+All binary and unary operators from `core::ops` that have an associated `Output` type:
+- `+` → [`core::ops::Add`]
+- `-` → [`core::ops::Sub`]
+- `*` → [`core::ops::Mul`]
+- `/` → [`core::ops::Div`]
+- `%` → [`core::ops::Rem`]
+- `&` → [`core::ops::BitAnd`]
+- `|` → [`core::ops::BitOr`]
+- `^` → [`core::ops::BitXor`]
+- `<<` → [`core::ops::Shl`]
+- `>>` → [`core::ops::Shr`]
+- `!` → [`core::ops::Not`] (unary operator)
+- `-` → [`core::ops::Neg`] (unary operator)
 
 ## License
 
