@@ -241,3 +241,17 @@ fn test_custom_trait_name_with_any_syntax() {
 
     assert_eq!(test(1, 2), 3);
 }
+
+#[test]
+fn test_op_result_chained_mul_div() {
+    #[op_result]
+    fn test<T, U, V>(a: T, b: U) -> V
+    where
+        [(); T * U * U / U = V]:,
+        U: Copy,
+    {
+        ((a * b) * b) / b
+    }
+
+    assert_eq!(test(1, 2), 2);
+}

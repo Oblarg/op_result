@@ -4,6 +4,7 @@ use quote::{quote, quote_spanned};
 use syn::{Expr, ExprBinary, ExprUnary, ItemFn};
 
 use crate::utils;
+use crate::output;
 
 struct OpResultConfig {
     well_formedness_syntax: bool,  // true = enable well-formedness syntax [(); ...]:
@@ -306,6 +307,30 @@ fn expand_expr_to_bound(expr: &Expr, output_assign: Option<&Expr>) -> Option<pro
             }
             
             // Not a chain, or operators don't match - treat as simple binary expression
+            // If left is a complex expression, we need to recursively expand it to build nested bounds
+            if matches!(left.as_ref(), Expr::Binary(_) | Expr::Unary(_)) {
+                // Left is a binary or unary expression - recursively expand it to get nested bounds
+                // Then use its Output type in the current bound
+                if let Some(left_bound) = expand_expr_to_bound(left.as_ref(), None) {
+                    // Extract the base type from the left bound and build nested Output bounds
+                    // For example, if left_bound is "T: Mul<U, Output: Mul<U>>", we want:
+                    // "<T as Mul<U, Output: Mul<U>>>::Output: Div<U, Output = V>"
+                    let left_output_type = output::expand_expr(left.as_ref());
+                    
+                    let mut generic_params = quote! { #right };
+                    if let Some(output) = output_assign {
+                        generic_params = quote! { #right, Output = #output };
+                    }
+                    
+                    // Generate both the left bound and the current bound
+                    return Some(quote! {
+                        #left_bound,
+                        #left_output_type: core::ops::#trait_name<#generic_params>
+                    });
+                }
+            }
+            
+            // Left is a simple type identifier - use it directly
             let mut generic_params = quote! { #right };
             
             // Add Output = ... if specified
