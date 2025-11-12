@@ -1,6 +1,6 @@
 [package]
 name = "op_result"
-version = "0.5.6"
+version = "0.5.7"
 edition = "2021"
 description = "Thin syntactic sugar for writing associated type algebra with core::ops expressions"
 license = "Apache-2.0 OR MIT"

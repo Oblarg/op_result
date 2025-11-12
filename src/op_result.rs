@@ -87,7 +87,7 @@ pub fn expand_op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_ts = proc_macro2::TokenStream::from(item);
     
     // Expand all `(): IsDefined<{...}>` patterns in the token stream
-    let (expanded_ts, mut defined_expansions) = expand_defined_in_tokens(item_ts, config.clone());
+    let (expanded_ts, mut defined_expansions) = expand_defined_in_token_tree(item_ts, config.clone());
     
     // Try to parse as different item types
     match syn::parse2::<Item>(expanded_ts.clone()) {
@@ -266,7 +266,7 @@ fn process_impl_item(item: syn::ImplItem, config: OpResultConfig) -> (syn::ImplI
         syn::ImplItem::Fn(method) => {
             // Process the method's where clause recursively
             let method_ts = quote! { #method };
-            let (expanded_ts, expansions) = expand_defined_in_tokens(method_ts, config);
+            let (expanded_ts, expansions) = expand_defined_in_token_tree(method_ts, config);
             match syn::parse2::<syn::ImplItem>(expanded_ts) {
                 Ok(processed) => (processed, expansions),
                 Err(_) => (syn::ImplItem::Fn(method), expansions), // Fallback to original, but keep expansions
@@ -275,7 +275,7 @@ fn process_impl_item(item: syn::ImplItem, config: OpResultConfig) -> (syn::ImplI
         syn::ImplItem::Type(ty) => {
             // Process the associated type's where clause
             let ty_ts = quote! { #ty };
-            let (expanded_ts, expansions) = expand_defined_in_tokens(ty_ts, config);
+            let (expanded_ts, expansions) = expand_defined_in_token_tree(ty_ts, config);
             match syn::parse2::<syn::ImplItem>(expanded_ts) {
                 Ok(processed) => (processed, expansions),
                 Err(_) => (syn::ImplItem::Type(ty), expansions), // Fallback to original, but keep expansions
@@ -301,7 +301,7 @@ fn process_trait_item(item: syn::TraitItem, config: OpResultConfig) -> (syn::Tra
         syn::TraitItem::Fn(method) => {
             // Process the method's where clause recursively
             let method_ts = quote! { #method };
-            let (expanded_ts, expansions) = expand_defined_in_tokens(method_ts, config);
+            let (expanded_ts, expansions) = expand_defined_in_token_tree(method_ts, config);
             match syn::parse2::<syn::TraitItem>(expanded_ts) {
                 Ok(processed) => (processed, expansions),
                 Err(_) => (syn::TraitItem::Fn(method), expansions), // Fallback to original, but keep expansions
@@ -310,7 +310,7 @@ fn process_trait_item(item: syn::TraitItem, config: OpResultConfig) -> (syn::Tra
         syn::TraitItem::Type(ty) => {
             // Process the associated type's where clause
             let ty_ts = quote! { #ty };
-            let (expanded_ts, expansions) = expand_defined_in_tokens(ty_ts, config);
+            let (expanded_ts, expansions) = expand_defined_in_token_tree(ty_ts, config);
             match syn::parse2::<syn::TraitItem>(expanded_ts) {
                 Ok(processed) => (processed, expansions),
                 Err(_) => (syn::TraitItem::Type(ty), expansions), // Fallback to original, but keep expansions
@@ -328,11 +328,6 @@ fn process_trait_item(item: syn::TraitItem, config: OpResultConfig) -> (syn::Tra
         _ => (item, Vec::new()),
     }
 }
-
-fn expand_defined_in_tokens(tokens: proc_macro2::TokenStream, config: OpResultConfig) -> (proc_macro2::TokenStream, Vec<(Span, proc_macro2::TokenStream)>) {
-    expand_defined_in_token_tree(tokens, config)
-}
-
 
 fn expand_defined_in_token_tree(tt: proc_macro2::TokenStream, config: OpResultConfig) -> (proc_macro2::TokenStream, Vec<(Span, proc_macro2::TokenStream)>) {
     let mut result = proc_macro2::TokenStream::new();
@@ -445,11 +440,6 @@ fn expand_defined_in_token_tree(tt: proc_macro2::TokenStream, config: OpResultCo
                 }
             }
         }
-        
-        // If we have too many tokens, flush the first one
-        if tokens.len() > 10 {
-            result.extend(std::iter::once(tokens.remove(0)));
-        }
     }
     
     // Flush remaining tokens
@@ -480,6 +470,29 @@ fn try_parse_and_expand_defined_from_stream(arg_stream: proc_macro2::TokenStream
     expand_expr_to_bound(&main_expr, output_expr.as_ref())
 }
 
+// Extracts trait information from a binary or unary expression
+// Returns (trait_name, nested_output_operand, generic_param_operand)
+// where nested_output_operand is Some for binary ops, None for unary ops
+fn extract_trait_info_from_expr(expr: &Expr) -> Option<(proc_macro2::TokenStream, Option<Box<Expr>>, Box<Expr>)> {
+    macro_rules! extract_trait_info {
+        ($op:expr, $get_span:path, $get_trait:path, $nested_output:expr, $generic_param:expr) => {{
+            let op_span = $get_span($op);
+            let trait_name = $get_trait($op, op_span);
+            Some((trait_name, $nested_output, $generic_param))
+        }};
+    }
+    
+    match expr {
+        Expr::Binary(ExprBinary { left, op, right, .. }) => {
+            extract_trait_info!(op, utils::get_op_span, utils::op_to_trait_spanned, Some(right.clone()), left.clone())
+        }
+        Expr::Unary(ExprUnary { op, expr: inner_expr, .. }) => {
+            extract_trait_info!(op, utils::get_un_op_span, utils::un_op_to_trait_spanned, None, inner_expr.clone())
+        }
+        _ => None,
+    }
+}
+
 // Recursively expands an expression to a trait bound, handling chained operators
 fn expand_expr_to_bound(expr: &Expr, output_assign: Option<&Expr>) -> Option<proc_macro2::TokenStream> {
     match expr {
@@ -507,116 +520,45 @@ fn expand_expr_to_bound(expr: &Expr, output_assign: Option<&Expr>) -> Option<pro
             
             // Not a chain, or operators don't match - treat as simple binary expression
             // Check if right is a complex expression - if so, nest the right's bound inside current Output
-            if matches!(right.as_ref(), Expr::Binary(_) | Expr::Unary(_)) {
-                // Right is a binary or unary expression - nest the right's bound inside current Output
-                // For example, T + (T / T) = T should become: T: Add<T, Output: Div<T, Output = T>>
-                if let Expr::Binary(ExprBinary { left: right_left, op: right_op, right: right_right, .. }) = right.as_ref() {
-                    let right_op_span = utils::get_op_span(right_op);
-                    let right_trait_name = utils::op_to_trait_spanned(right_op, right_op_span);
-                    
-                    let nested_output = if let Some(output) = output_assign {
-                        quote! { Output: core::ops::#right_trait_name<#right_right, Output = #output> }
-                    } else {
-                        quote! { Output: core::ops::#right_trait_name<#right_right> }
-                    };
-                    
-                    let trait_spanned = quote_spanned! { op_span => core::ops::#trait_name };
-                    let generic_params = quote! { #right_left, #nested_output };
-                    
-                    return Some(quote! {
-                        #left: #trait_spanned<#generic_params>
-                    });
-                } else if let Expr::Unary(ExprUnary { op: right_op, expr: right_expr, .. }) = right.as_ref() {
-                    let right_op_span = utils::get_un_op_span(right_op);
-                    let right_trait_name = utils::un_op_to_trait_spanned(right_op, right_op_span);
-                    
-                    let nested_output = if let Some(output) = output_assign {
-                        quote! { Output: core::ops::#right_trait_name<Output = #output> }
-                    } else {
-                        quote! { Output: core::ops::#right_trait_name }
-                    };
-                    
-                    let trait_spanned = quote_spanned! { op_span => core::ops::#trait_name };
-                    return Some(quote! {
-                        #left: #trait_spanned<#right_expr, #nested_output>
-                    });
-                }
+            // Right is a binary or unary expression - nest the right's bound inside current Output
+            // For example, T + (T / T) = T should become: T: Add<T, Output: Div<T, Output = T>>
+            if let Some((right_trait_name, nested_output_operand, generic_param_operand)) = extract_trait_info_from_expr(right.as_ref()) {
+                // Build generic params for the nested trait
+                let nested_trait_params = match (nested_output_operand, output_assign) {
+                    (Some(operand), Some(output)) => quote! { #operand, Output = #output },
+                    (Some(operand), None) => quote! { #operand },
+                    (None, Some(output)) => quote! { Output = #output },
+                    (None, None) => proc_macro2::TokenStream::new(),
+                };
+                
+                let nested_output = if nested_trait_params.is_empty() {
+                    quote! { Output: core::ops::#right_trait_name }
+                } else {
+                    quote! { Output: core::ops::#right_trait_name<#nested_trait_params> }
+                };
+                
+                let trait_spanned = quote_spanned! { op_span => core::ops::#trait_name };
+                let generic_params = quote! { #generic_param_operand, #nested_output };
+                
+                return Some(quote! {
+                    #left: #trait_spanned<#generic_params>
+                });
             }
             
-            // If left is a complex expression, we need to recursively expand it to build nested bounds
+            // If left is a complex expression, extract all operations to handle precedence correctly
             if matches!(left.as_ref(), Expr::Binary(_) | Expr::Unary(_)) {
-                // Left is a binary or unary expression - nest the current bound inside the left's Output
-                // For example, T + T / T = T should become: T: Add<T, Output: Div<T, Output = T>>
-                // For T * U * U / U = V, we need to recursively expand (T * U) * U first
-                
                 // Recursively expand the left side to get its bound structure
                 if expand_expr_to_bound(left.as_ref(), None).is_some() {
-                    // The left can be expanded, but for different operators we'll use extract_all_operations
-                    // For now, let's use a simpler approach: extract base type from left expression
-                    // and build the nested bound manually
-                    let left_op_span = if let Expr::Binary(ExprBinary { op: left_op, .. }) = left.as_ref() {
-                        utils::get_op_span(left_op)
-                    } else if let Expr::Unary(ExprUnary { op: left_op, .. }) = left.as_ref() {
-                        utils::get_un_op_span(left_op)
-                    } else {
-                        return None;
-                    };
+                    // Extract all operations from left expression (handles both binary and unary)
+                    let (base_type, mut operations) = extract_all_operations(left.as_ref());
                     
-                    let left_trait_name = if let Expr::Binary(ExprBinary { op: left_op, .. }) = left.as_ref() {
-                        utils::op_to_trait_spanned(left_op, left_op_span)
-                    } else if let Expr::Unary(ExprUnary { op: left_op, .. }) = left.as_ref() {
-                        utils::un_op_to_trait_spanned(left_op, left_op_span)
-                    } else {
-                        return None;
-                    };
+                    // Add the current operation
+                    let op_span = utils::get_op_span(op);
+                    let trait_name = utils::op_to_trait_spanned(op, op_span);
+                    operations.push((op_span, trait_name, Some(right.clone())));
                     
-                    // Check if left is a chained operation with the same operator
-                    if let Expr::Binary(ExprBinary { op: left_op, .. }) = left.as_ref() {
-                        if std::mem::discriminant(op) != std::mem::discriminant(left_op) {
-                            // Different operators - extract all operations from left, then add current op
-                            let (base_type, mut operations) = extract_all_operations(left.as_ref());
-                            
-                            // Add the current operation
-                            let op_span = utils::get_op_span(op);
-                            let trait_name = utils::op_to_trait_spanned(op, op_span);
-                            operations.push((op_span, trait_name, right.clone()));
-                            
-                            // Build the nested bound with all operations
-                            return Some(build_mixed_nested_bound(base_type, &operations, output_assign));
-                        }
-                    }
-                    
-                    // Same operator or unary - use the original logic
-                    let (left_base, left_right_operand) = if let Expr::Binary(ExprBinary { left: base, right: right_op, .. }) = left.as_ref() {
-                        (base.clone(), right_op.clone())
-                    } else if let Expr::Unary(ExprUnary { expr: inner, .. }) = left.as_ref() {
-                        (inner.clone(), inner.clone()) // For unary, use the inner expr as both
-                    } else {
-                        return None;
-                    };
-                    
-                    // Build nested bound: left_base: Trait<left_right, Output: current_trait<right, Output = output>>
-                    let nested_output = if let Some(output) = output_assign {
-                        quote! { Output: core::ops::#trait_name<#right, Output = #output> }
-                    } else {
-                        // If right is also complex, recursively expand it
-                        if matches!(right.as_ref(), Expr::Binary(_) | Expr::Unary(_)) {
-                            if let Some(right_bound) = expand_expr_to_bound(right.as_ref(), None) {
-                                quote! { Output: core::ops::#trait_name<#right, #right_bound> }
-                            } else {
-                                quote! { Output: core::ops::#trait_name<#right> }
-                            }
-                        } else {
-                            quote! { Output: core::ops::#trait_name<#right> }
-                        }
-                    };
-                    
-                    let left_trait_spanned = quote_spanned! { left_op_span => core::ops::#left_trait_name };
-                    let generic_params = quote! { #left_right_operand, #nested_output };
-                    
-                    return Some(quote! {
-                        #left_base: #left_trait_spanned<#generic_params>
-                    });
+                    // Build the nested bound with all operations
+                    return Some(build_mixed_nested_bound(base_type, &operations, output_assign));
                 }
             }
             
@@ -659,14 +601,22 @@ fn expand_expr_to_bound(expr: &Expr, output_assign: Option<&Expr>) -> Option<pro
 
 // Extracts all operations from an expression in left-to-right order
 // Returns (base_type, operations) where operations can have different operators
-fn extract_all_operations(expr: &Expr) -> (Box<Expr>, Vec<(proc_macro2::Span, proc_macro2::TokenStream, Box<Expr>)>) {
+// For unary operations, the right operand is None
+fn extract_all_operations(expr: &Expr) -> (Box<Expr>, Vec<(proc_macro2::Span, proc_macro2::TokenStream, Option<Box<Expr>>)>) {
     match expr {
         Expr::Paren(expr_paren) => extract_all_operations(&expr_paren.expr),
         Expr::Binary(ExprBinary { left, op, right, .. }) => {
             let (base_type, mut operations) = extract_all_operations(left.as_ref());
             let op_span = utils::get_op_span(op);
             let trait_name = utils::op_to_trait_spanned(op, op_span);
-            operations.push((op_span, trait_name, right.clone()));
+            operations.push((op_span, trait_name, Some(right.clone())));
+            (base_type, operations)
+        }
+        Expr::Unary(ExprUnary { op, expr: inner, .. }) => {
+            let (base_type, mut operations) = extract_all_operations(inner.as_ref());
+            let op_span = utils::get_un_op_span(op);
+            let trait_name = utils::un_op_to_trait_spanned(op, op_span);
+            operations.push((op_span, trait_name, None)); // None indicates unary operation
             (base_type, operations)
         }
         _ => (Box::new(expr.clone()), Vec::new()),
@@ -674,9 +624,10 @@ fn extract_all_operations(expr: &Expr) -> (Box<Expr>, Vec<(proc_macro2::Span, pr
 }
 
 // Builds a nested bound from a list of operations (can have different operators)
+// For unary operations, right operand is None
 fn build_mixed_nested_bound(
     base_type: Box<Expr>,
-    operations: &[(proc_macro2::Span, proc_macro2::TokenStream, Box<Expr>)],
+    operations: &[(proc_macro2::Span, proc_macro2::TokenStream, Option<Box<Expr>>)],
     output_assign: Option<&Expr>,
 ) -> proc_macro2::TokenStream {
     if operations.is_empty() {
@@ -686,34 +637,75 @@ fn build_mixed_nested_bound(
     if operations.len() == 1 {
         let (span, trait_name, right) = &operations[0];
         let trait_spanned = quote_spanned! { *span => core::ops::#trait_name };
-        let mut generic_params = quote! { #right };
-        if let Some(output) = output_assign {
-            generic_params = quote! { #right, Output = #output };
-        }
-        return quote! {
-            #base_type: #trait_spanned<#generic_params>
+        let generic_params = match right {
+            Some(right) => {
+                if let Some(output) = output_assign {
+                    quote! { #right, Output = #output }
+                } else {
+                    quote! { #right }
+                }
+            }
+            None => {
+                // Unary operation - only Output parameter
+                if let Some(output) = output_assign {
+                    quote! { Output = #output }
+                } else {
+                    proc_macro2::TokenStream::new()
+                }
+            }
         };
+        
+        if generic_params.is_empty() {
+            return quote! {
+                #base_type: #trait_spanned
+            };
+        } else {
+            return quote! {
+                #base_type: #trait_spanned<#generic_params>
+            };
+        }
     }
     
     // Build from rightmost (innermost) to leftmost (outermost)
     let (last_span, last_trait, last_right) = &operations[operations.len() - 1];
     let last_trait_spanned = quote_spanned! { *last_span => core::ops::#last_trait };
     
-    let mut nested_output = if let Some(output) = output_assign {
-        quote! {
-            Output: #last_trait_spanned<#last_right, Output = #output>
+    let mut nested_output = match last_right {
+        Some(last_right) => {
+            if let Some(output) = output_assign {
+                quote! {
+                    Output: #last_trait_spanned<#last_right, Output = #output>
+                }
+            } else {
+                quote! {
+                    Output: #last_trait_spanned<#last_right>
+                }
+            }
         }
-    } else {
-        quote! {
-            Output: #last_trait_spanned<#last_right>
+        None => {
+            // Unary operation - only Output parameter
+            if let Some(output) = output_assign {
+                quote! {
+                    Output: #last_trait_spanned<Output = #output>
+                }
+            } else {
+                quote! {
+                    Output: #last_trait_spanned
+                }
+            }
         }
     };
     
     // Build nested Output bounds from second-to-last down to second operation
     for (span, trait_name, right) in operations.iter().rev().skip(1).take(operations.len() - 2) {
         let trait_spanned = quote_spanned! { *span => core::ops::#trait_name };
-        nested_output = quote! {
-            Output: #trait_spanned<#right, #nested_output>
+        nested_output = match right {
+            Some(right) => quote! {
+                Output: #trait_spanned<#right, #nested_output>
+            },
+            None => quote! {
+                Output: #trait_spanned<#nested_output>
+            },
         };
     }
     
@@ -721,7 +713,10 @@ fn build_mixed_nested_bound(
     let (first_span, first_trait, first_right) = &operations[0];
     let first_trait_spanned = quote_spanned! { *first_span => core::ops::#first_trait };
     
-    let generic_params = quote! { #first_right, #nested_output };
+    let generic_params = match first_right {
+        Some(first_right) => quote! { #first_right, #nested_output },
+        None => nested_output, // For unary, the nested_output becomes the generic params
+    };
     
     quote! {
         #base_type: #first_trait_spanned<#generic_params>
@@ -740,23 +735,12 @@ fn extract_chain_operations(
             extract_chain_operations(&expr_paren.expr, op)
         }
         Expr::Binary(ExprBinary { left, op: left_op, right, .. }) => {
-            if std::mem::discriminant(op) == std::mem::discriminant(left_op) {
-                // Same operator - continue extracting from left
-                let (base_type, mut operations) = extract_chain_operations(left.as_ref(), op);
-                // Add the current operation
-                let left_op_span = utils::get_op_span(left_op);
-                let left_trait_name = utils::op_to_trait_spanned(left_op, left_op_span);
-                operations.push((left_op_span, left_trait_name, right.clone()));
-                (base_type, operations)
-            } else {
-                // Different operator - this is the base, extract operations from left
-                let (base_type, mut operations) = extract_chain_operations(left.as_ref(), left_op);
-                // Add the current operation
-                let left_op_span = utils::get_op_span(left_op);
-                let left_trait_name = utils::op_to_trait_spanned(left_op, left_op_span);
-                operations.push((left_op_span, left_trait_name, right.clone()));
-                (base_type, operations)
-            }
+            let (base_type, mut operations) = extract_chain_operations(left.as_ref(), left_op);
+            // Add the current operation
+            let left_op_span = utils::get_op_span(left_op);
+            let left_trait_name = utils::op_to_trait_spanned(left_op, left_op_span);
+            operations.push((left_op_span, left_trait_name, right.clone()));
+            (base_type, operations)
         }
         _ => {
             // Base case: not a binary expression - this is the base type
