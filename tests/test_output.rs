@@ -276,7 +276,7 @@ fn test_output_unary_nested() {
     // Test unary operators nested in expressions
     type Complex = output!((!bool) & bool);
     let _: Complex = (!true) & false;
-    
+
     type ComplexNeg = output!((-i32) + i32);
     let _: ComplexNeg = (-42i32) + 10i32;
 }

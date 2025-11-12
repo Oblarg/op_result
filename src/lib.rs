@@ -22,7 +22,7 @@
 //! let result = add(1, 2);
 //! assert_eq!(result, 3);
 //! ```
-//! 
+//!
 //! ## Supported Operators
 //!
 //! All binary and unary operators from `core::ops` that have an associated `Output` type:
@@ -39,9 +39,9 @@
 //! - `!` → [`core::ops::Not`](https://doc.rust-lang.org/core/ops/trait.Not.html) (unary operator)
 //! - `-` → [`core::ops::Neg`](https://doc.rust-lang.org/core/ops/trait.Neg.html) (unary operator)
 
-mod utils;
-mod output;
 mod op_result;
+mod output;
+mod utils;
 
 use proc_macro::TokenStream;
 
@@ -49,17 +49,17 @@ use proc_macro::TokenStream;
 ///
 /// Transforms `output!(T + U)` into `<T as core::ops::Add<U>>::Output`. Works recursively
 /// for nested expressions, preserving parentheses for operator precedence.
-/// 
+///
 /// ## Syntax
-/// 
+///
 /// ```rust,ignore
 /// output!(<expr>)
 /// ```
-/// 
+///
 /// where `<expr>` is any valid operator output expression.  An "operator output expression" is:
 ///  - A unary operator expression, e.g. `!T` or `-T` (equivalent to `<T as core::ops::Not>::Output` or `<T as core::ops::Neg>::Output`)
 ///  - A binary operator expression, e.g. `T + U` (equivalent to `<T as core::ops::Add<U>>::Output`)
-///  - A combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)` 
+///  - A combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)`
 ///    (equivalent to `<T as core::ops::Add<U, Output: Mul<V>>>::Output` or `<T as core::ops::Add<U, Output: Mul<V, Output: Mul<W>>>>::Output`)
 ///
 /// ## Examples
@@ -88,9 +88,9 @@ pub fn output(input: TokenStream) -> TokenStream {
 ///
 /// The attribute macro processes the entire function and transforms operator expressions
 /// into trait bounds.
-/// 
+///
 /// ## Syntax
-/// 
+///
 /// ```rust,ignore
 /// #[op_result]
 /// #[op_result(marker_trait_syntax)]
@@ -108,25 +108,25 @@ pub fn output(input: TokenStream) -> TokenStream {
 /// {
 /// }
 /// ```
-/// 
+///
 /// By default, both syntaxes are supported. However, the well-formedness syntax `[(); <expr>]:` may
 /// conflict with const generic syntax in some cases. You can disable well-formedness syntax parsing
 /// by using `#[op_result(marker_trait_syntax)]`, which will only process `(): IsDefined<{ <expr> }>` syntax.
 /// Alternatively, you can disable marker trait syntax parsing by using `#[op_result(well_formedness_syntax)]`,
 /// which will only process `[(); <expr>]:` syntax. The `IsDefined<>` syntax is uniquely detectable
 /// and will not conflict with const generics.
-/// 
+///
 /// You can also use `#[op_result(any_syntax)]` to explicitly enable both syntaxes (same as default).
-/// 
+///
 /// An optional second parameter can be provided to specify a custom marker trait name (defaults to `IsDefined`).
 /// This parameter is only valid with `marker_trait_syntax` or `any_syntax`. For example:
 /// - `#[op_result(marker_trait_syntax, MyTrait)]` - only processes `(): MyTrait<{ <expr> }>` syntax
 /// - `#[op_result(any_syntax, MyTrait)]` - processes both `[(); <expr>]:` and `(): MyTrait<{ <expr> }>` syntax
-/// 
+///
 /// where `<expr>` is any valid operator bound expression. An "operator bound expression" is:
 ///  - A unary operator expression, e.g. `!T` or `-T` (equivalent to `T: Not` or `T: Neg`)
 ///  - A binary operator expression, e.g. `T + U` (equivalent to `T: Add<U>`)
-///  - Any combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)` 
+///  - Any combination thereof, e.g. `(T + U) * V` or `(T + U) * (V + W)`
 ///    (equivalent to `T: Add<U, Output: Mul<V>>` or `T: Add<U, Output: Mul<V, Output: Mul<W>>>`)
 ///  - An assignment of any of the above to a type, e.g. `T + U = V` (equivalent to `T: Add<U, Output = V>`)
 ///

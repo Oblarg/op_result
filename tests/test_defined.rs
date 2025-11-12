@@ -4,11 +4,7 @@ use op_result::output;
 #[test]
 fn test_output_addition() {
     #[op_result]
-    fn test<T, U, V>(
-        a: T,
-        b: U,
-        c: V,
-    ) -> output!(T + U + V)
+    fn test<T, U, V>(a: T, b: U, c: V) -> output!(T + U + V)
     where
         (): IsDefined<{ T + U + V }>,
     {
@@ -21,11 +17,7 @@ fn test_output_addition() {
 #[test]
 fn test_output_subtraction() {
     #[op_result]
-    fn test<T, U, V>(
-        a: T,
-        b: U,
-        c: V,
-    ) -> output!(T - U - V)
+    fn test<T, U, V>(a: T, b: U, c: V) -> output!(T - U - V)
     where
         (): IsDefined<{ T - U - V }>,
     {
@@ -37,11 +29,7 @@ fn test_output_subtraction() {
 #[test]
 fn test_bracket_notation_addition() {
     #[op_result]
-    fn test<T, U, V>(
-        a: T,
-        b: U,
-        c: V,
-    ) -> output!(T + U + V)
+    fn test<T, U, V>(a: T, b: U, c: V) -> output!(T + U + V)
     where
         [(); T + U + V]:,
     {
@@ -54,11 +42,7 @@ fn test_bracket_notation_addition() {
 #[test]
 fn test_bracket_notation_subtraction() {
     #[op_result]
-    fn test<T, U, V>(
-        a: T,
-        b: U,
-        c: V,
-    ) -> output!(T - U - V)
+    fn test<T, U, V>(a: T, b: U, c: V) -> output!(T - U - V)
     where
         [(); T - U - V]:,
     {
@@ -70,11 +54,7 @@ fn test_bracket_notation_subtraction() {
 #[test]
 fn test_mixed_notations() {
     #[op_result]
-    fn test<T, U, V>(
-        a: T,
-        b: U,
-        c: V,
-    ) -> output!(T + U + V)
+    fn test<T, U, V>(a: T, b: U, c: V) -> output!(T + U + V)
     where
         (): IsDefined<{ T + U + V }>,
     {
@@ -216,7 +196,7 @@ fn test_any_syntax_flag() {
 }
 
 #[test]
-fn test_custom_trait_name_with_marker_trait_syntax() {    
+fn test_custom_trait_name_with_marker_trait_syntax() {
     #[op_result(marker_trait_syntax, MyTrait)]
     fn test<T, U>(a: T, b: U) -> output!(T + U)
     where

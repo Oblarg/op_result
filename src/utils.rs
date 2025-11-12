@@ -40,14 +40,12 @@ pub fn op_to_trait_spanned(op: &BinOp, span: Span) -> proc_macro2::TokenStream {
         BitXor(_) => quote_spanned! { span => BitXor },
         Shl(_) => quote_spanned! { span => Shl },
         Shr(_) => quote_spanned! { span => Shr },
-        And(_) | Or(_) | Eq(_) | Lt(_) | Le(_) | Ne(_) | Ge(_) | Gt(_) => {
-            syn::Error::new_spanned(op, "This operator does not have an associated Output type in core::ops")
-                .to_compile_error()
-        }
-        _ => {
-            syn::Error::new_spanned(op, "Unsupported operator")
-                .to_compile_error()
-        }
+        And(_) | Or(_) | Eq(_) | Lt(_) | Le(_) | Ne(_) | Ge(_) | Gt(_) => syn::Error::new_spanned(
+            op,
+            "This operator does not have an associated Output type in core::ops",
+        )
+        .to_compile_error(),
+        _ => syn::Error::new_spanned(op, "Unsupported operator").to_compile_error(),
     }
 }
 
@@ -66,14 +64,11 @@ pub fn un_op_to_trait_spanned(op: &UnOp, span: Span) -> proc_macro2::TokenStream
     match op {
         Not(_) => quote_spanned! { span => Not },
         Neg(_) => quote_spanned! { span => Neg },
-        Deref(_) => {
-            syn::Error::new_spanned(op, "The deref operator (*) does not have an associated Output type in core::ops")
-                .to_compile_error()
-        }
-        _ => {
-            syn::Error::new_spanned(op, "Unsupported unary operator")
-                .to_compile_error()
-        }
+        Deref(_) => syn::Error::new_spanned(
+            op,
+            "The deref operator (*) does not have an associated Output type in core::ops",
+        )
+        .to_compile_error(),
+        _ => syn::Error::new_spanned(op, "Unsupported unary operator").to_compile_error(),
     }
 }
-

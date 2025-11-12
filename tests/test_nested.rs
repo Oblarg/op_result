@@ -137,4 +137,3 @@ fn test_impl_block_with_where_clause_and_method_where_clause() {
     let w = Wrapper(1);
     assert_eq!(w.add(2), 3);
 }
-
