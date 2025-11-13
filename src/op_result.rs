@@ -5,6 +5,13 @@ use syn::{Expr, ExprBinary, ExprUnary, Item, ItemFn};
 
 use crate::utils;
 
+// Type alias for operation information: (span, trait_name, optional_right_operand)
+type OperationInfo = (
+    proc_macro2::Span,
+    proc_macro2::TokenStream,
+    Option<Box<Expr>>,
+);
+
 #[derive(Clone)]
 struct OpResultConfig {
     well_formedness_syntax: bool, // true = enable well-formedness syntax [(); ...]:
@@ -102,7 +109,7 @@ pub fn expand_op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
             // Create type aliases for IDE hover support - one for each IsDefined usage
             let mut defined_types = proc_macro2::TokenStream::new();
 
-            for (_idx, (span, expansion)) in defined_expansions.iter().enumerate() {
+            for (span, expansion) in defined_expansions.iter() {
                 let expansion_str: String = expansion.to_string();
                 let expansion_doc = format!("**Expands to:** `{}`", expansion_str);
                 let defined_ident = proc_macro2::Ident::new(&marker_trait_name, *span);
@@ -131,7 +138,7 @@ pub fn expand_op_result(attr: TokenStream, item: TokenStream) -> TokenStream {
                 Ok(item_fn) => {
                     let mut defined_types = proc_macro2::TokenStream::new();
 
-                    for (_idx, (span, expansion)) in defined_expansions.iter().enumerate() {
+                    for (span, expansion) in defined_expansions.iter() {
                         let expansion_str: String = expansion.to_string();
                         let expansion_doc = format!("**Expands to:** `{}`", expansion_str);
                         let defined_ident = proc_macro2::Ident::new(&marker_trait_name, *span);
@@ -402,7 +409,7 @@ fn expand_defined_in_token_tree(
                 if group1.delimiter() == proc_macro2::Delimiter::Parenthesis
                     && group1.stream().is_empty()
                     && colon.as_char() == ':'
-                    && ident.to_string() == config.marker_trait_name
+                    && *ident == config.marker_trait_name
                 {
                     // Found `(): IsDefined` - check if next is `<{...}>` (const generic syntax)
                     let defined_span = ident.span();
@@ -455,7 +462,7 @@ fn expand_defined_in_token_tree(
     }
 
     // Flush remaining tokens
-    result.extend(tokens.into_iter());
+    result.extend(tokens);
 
     (result, defined_expansions)
 }
@@ -639,16 +646,7 @@ fn expand_expr_to_bound(
 // Extracts all operations from an expression in left-to-right order
 // Returns (base_type, operations) where operations can have different operators
 // For unary operations, the right operand is None
-fn extract_all_operations(
-    expr: &Expr,
-) -> (
-    Box<Expr>,
-    Vec<(
-        proc_macro2::Span,
-        proc_macro2::TokenStream,
-        Option<Box<Expr>>,
-    )>,
-) {
+fn extract_all_operations(expr: &Expr) -> (Box<Expr>, Vec<OperationInfo>) {
     match expr {
         Expr::Paren(expr_paren) => extract_all_operations(&expr_paren.expr),
         Expr::Binary(ExprBinary {
@@ -677,11 +675,7 @@ fn extract_all_operations(
 // For unary operations, right operand is None
 fn build_mixed_nested_bound(
     base_type: Box<Expr>,
-    operations: &[(
-        proc_macro2::Span,
-        proc_macro2::TokenStream,
-        Option<Box<Expr>>,
-    )],
+    operations: &[OperationInfo],
     output_assign: Option<&Expr>,
 ) -> proc_macro2::TokenStream {
     if operations.is_empty() {

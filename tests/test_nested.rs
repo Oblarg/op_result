@@ -4,6 +4,7 @@ use op_result::output;
 #[test]
 fn test_struct_with_where_clause() {
     #[op_result]
+    #[allow(dead_code)]
     struct TestStruct<T, U>
     where
         [(); T + U]:,

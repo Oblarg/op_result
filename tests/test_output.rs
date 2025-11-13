@@ -261,7 +261,7 @@ fn test_parens_preservation() {
 fn test_output_unary_not() {
     // Test unary ! operator in output! macro
     type NotOutput = output!(!bool);
-    let _: NotOutput = !true;
+    let _: NotOutput = false;
 }
 
 #[test]
@@ -275,7 +275,7 @@ fn test_output_unary_neg() {
 fn test_output_unary_nested() {
     // Test unary operators nested in expressions
     type Complex = output!((!bool) & bool);
-    let _: Complex = (!true) & false;
+    let _: Complex = false & false;
 
     type ComplexNeg = output!((-i32) + i32);
     let _: ComplexNeg = (-42i32) + 10i32;
